@@ -3,6 +3,7 @@ import { DocumentModel, paperDimensions } from "../document/model.js";
 import { importSvg } from "../svg/importer.js";
 import { estimateCoverage, generateGcode } from "../gcode/exporter.js";
 import { PaperCanvas } from "./paper-canvas.js";
+import { NotificationHistory } from "./notification-history.js";
 
 const byId = (id) => document.getElementById(id);
 const numeric = (id) => Number(byId(id).value);
@@ -20,6 +21,9 @@ export class AppController {
     this.canvas = new PaperCanvas(byId("paper-canvas"), this.model, this.paperScope, () => this.update());
     this.aspectLocked = true;
     this.lastGcode = "";
+    this.notifications = new NotificationHistory();
+    this.activeWarning = "";
+    this.warningTimer = null;
     this.canvas.aspectLocked = () => this.aspectLocked;
     this.bindEvents();
     this.update();
@@ -89,9 +93,19 @@ export class AppController {
     byId("zoom-out").addEventListener("click", () => this.canvas.setZoom(this.canvas.zoom / 1.2));
     byId("fit-sheet").addEventListener("click", () => this.fitSheet());
     byId("export-button").addEventListener("click", () => this.export());
+    byId("notification-toggle").addEventListener("click", () => this.toggleNotifications());
+    byId("clear-notifications").addEventListener("click", () => {
+      this.notifications.clear();
+      this.renderNotifications();
+    });
     byId("close-export").addEventListener("click", () => byId("export-dialog").close());
     byId("download-again").addEventListener("click", () => this.download());
+    byId("copy-gcode").addEventListener("click", () => this.copyGcode());
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#notification-tray, #notification-toggle")) this.toggleNotifications(false);
+    });
     document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") this.toggleNotifications(false);
       if ((event.key === "Delete" || event.key === "Backspace") && !event.target.matches("input,textarea,select") && this.model.selected) {
         this.model.remove();
         this.update();
@@ -189,7 +203,7 @@ export class AppController {
       byId("export-summary").textContent = `${paths.toLocaleString()} drawing moves · ${this.model.objects.length} object${this.model.objects.length === 1 ? "" : "s"} · ${this.model.width} × ${this.model.height} mm. Review machine limits and pen travel before plotting.`;
       this.download();
       byId("export-dialog").showModal();
-      this.showWarning("");
+      this.showWarning("G-code file download started. You can also copy the G-code from the export dialog.");
     } catch (error) {
       this.showWarning(error.message, true);
     }
@@ -206,11 +220,69 @@ export class AppController {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  async copyGcode() {
+    if (!this.lastGcode) return;
+    const button = byId("copy-gcode");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable in this browser context.");
+      await navigator.clipboard.writeText(this.lastGcode);
+      button.textContent = "Copied!";
+      this.showWarning("G-code copied to clipboard.");
+    } catch (error) {
+      button.textContent = "Copy failed";
+      this.showWarning(`Could not copy G-code: ${error.message}`, true);
+    }
+    setTimeout(() => { button.textContent = "Copy G-code"; }, 2000);
+  }
+
+  toggleNotifications(force) {
+    const tray = byId("notification-tray");
+    const open = force ?? tray.hidden;
+    tray.hidden = !open;
+    byId("notification-toggle").setAttribute("aria-expanded", String(open));
+    if (open) this.notifications.markAllRead();
+    this.renderNotifications();
+  }
+
+  renderNotifications() {
+    const list = byId("notification-list");
+    list.replaceChildren(...this.notifications.items.map((notification) => {
+      const item = document.createElement("li");
+      item.className = `notification-item${notification.error ? " error" : ""}`;
+      const message = document.createElement("div");
+      message.className = "notification-message";
+      message.textContent = notification.message;
+      const time = document.createElement("time");
+      time.className = "notification-time";
+      time.dateTime = notification.createdAt.toISOString();
+      time.textContent = notification.createdAt.toLocaleString();
+      item.append(message, time);
+      return item;
+    }));
+    byId("empty-notifications").hidden = this.notifications.items.length > 0;
+    const count = byId("notification-count");
+    count.textContent = String(this.notifications.unreadCount);
+    count.hidden = this.notifications.unreadCount === 0;
+  }
+
   showWarning(message, error = false) {
     const element = byId("warnings");
+    if (!message) {
+      this.activeWarning = "";
+      return;
+    }
+    if (message === this.activeWarning) return;
+    this.activeWarning = message;
+    this.notifications.add(message, error);
+    this.renderNotifications();
     element.textContent = message;
-    element.hidden = !message;
+    element.hidden = false;
     element.classList.toggle("error", error);
+    clearTimeout(this.warningTimer);
+    this.warningTimer = setTimeout(() => {
+      element.hidden = true;
+      this.warningTimer = null;
+    }, 5000);
   }
 
   update() {

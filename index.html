@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f4f3ef">
+    <meta name="theme-color" content="#14191a">
     <meta name="description" content="Arrange SVG artwork on a virtual sheet and export pen-plotter G-code, entirely offline.">
     <title>TE SVG 2 GRBL</title>
     <link rel="stylesheet" href="./styles.css">
@@ -14,7 +14,12 @@
       <a class="brand" href="#" aria-label="TE SVG 2 GRBL home">
         <span class="brand-mark">TE</span><span>SVG <span class="muted">to</span> GRBL</span>
       </a>
-      <div class="topbar-actions"><span class="offline"><i></i> Works offline</span><button class="button button-primary" id="export-button" type="button" disabled><span aria-hidden="true">↓</span> Export G-code</button></div>
+      <div class="topbar-actions">
+        <button class="button notification-toggle" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-tray">
+          Notifications <span id="notification-count" class="notification-count" hidden>0</span>
+        </button>
+        <button class="button button-primary" id="export-button" type="button" disabled><span aria-hidden="true">↓</span> Export G-code</button>
+      </div>
     </header>
     <main class="workspace">
       <aside class="sidebar">
@@ -67,6 +72,11 @@
         <div id="warnings" class="warnings" role="status" aria-live="polite" hidden></div>
       </section>
     </main>
-    <dialog id="export-dialog" class="export-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2>G-code exported</h2><p id="export-summary"></p><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="download-again" class="button button-primary" type="button">Download again</button></div></dialog>
+    <aside id="notification-tray" class="notification-tray" aria-label="Notification history" hidden>
+      <div class="tray-heading"><div><span class="eyebrow">RECENT ACTIVITY</span><h2>Notifications</h2></div><button id="clear-notifications" class="text-button" type="button">Clear all</button></div>
+      <ol id="notification-list" class="notification-list"></ol>
+      <p id="empty-notifications" class="empty-note">No notifications yet.</p>
+    </aside>
+    <dialog id="export-dialog" class="export-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2>G-code exported</h2><p id="export-summary"></p><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="copy-gcode" class="button" type="button">Copy G-code</button><button id="download-again" class="button button-primary" type="button">Download again</button></div></dialog>
   </body>
 </html>
