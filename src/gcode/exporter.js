@@ -4,6 +4,10 @@ function assertPositive(value, label) {
   if (!Number.isFinite(value) || value <= 0) throw new RangeError(`${label} must be a positive finite number.`);
 }
 
+function assertFinite(value, label) {
+  if (!Number.isFinite(value)) throw new RangeError(`${label} must be a finite number.`);
+}
+
 function transformedPath(object, path) {
   const scaleX = object.width / object.geometryWidth;
   const scaleY = object.height / object.geometryHeight;
@@ -68,6 +72,9 @@ export function generateGcode(objects, config) {
   assertPositive(config.machineHeight, "Plotter height");
   assertPositive(config.travelFeed, "Travel speed");
   assertPositive(config.drawFeed, "Drawing speed");
+  if (!Number.isFinite(config.tolerance) || config.tolerance < 0.01 || config.tolerance > 5) {
+    throw new RangeError("Curve tolerance must be between 0.01 and 5 mm.");
+  }
   if (!Number.isFinite(config.penUp) || !Number.isFinite(config.penDown) || config.penUp === config.penDown) {
     throw new RangeError("Pen-up and pen-down positions must be finite and different.");
   }
@@ -82,12 +89,17 @@ export function generateGcode(objects, config) {
     assertPositive(object.height, `Height of ${object.name}`);
     assertPositive(object.geometryWidth, `Geometry width of ${object.name}`);
     assertPositive(object.geometryHeight, `Geometry height of ${object.name}`);
-    const paths = flattenCubicPaths(object.paths, config.tolerance).map((path) => transformedPath(object, path));
+    assertFinite(object.x, `X position of ${object.name}`);
+    assertFinite(object.y, `Y position of ${object.name}`);
+    assertFinite(object.rotation, `Rotation of ${object.name}`);
+    const scale = Math.max(object.width / object.geometryWidth, object.height / object.geometryHeight);
+    const paths = flattenCubicPaths(object.paths, config.tolerance / scale).map((path) => transformedPath(object, path));
     for (const path of paths) {
       if (path.points.length < 2) continue;
       for (const point of path.points) {
         const epsilon = 1e-7;
-        if (point.x < -epsilon || point.y < -epsilon || point.x > workWidth + epsilon || point.y > workHeight + epsilon) {
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y) ||
+            point.x < -epsilon || point.y < -epsilon || point.x > workWidth + epsilon || point.y > workHeight + epsilon) {
           throw new RangeError(`“${object.name}” extends beyond the paper or plotter bounds; move or resize it before export.`);
         }
         const outputPoint = physicalPoint(point, config);
@@ -133,12 +145,20 @@ export function estimateCoverage(objects, paperWidth, paperHeight) {
   if (area <= 0) return 0;
   let length = 0;
   for (const object of objects) {
-    for (const path of flattenCubicPaths(object.paths, 0.25)) {
+    const scale = Math.max(object.width / object.geometryWidth, object.height / object.geometryHeight);
+    for (const path of flattenCubicPaths(object.paths, 0.25 / scale)) {
       for (let index = 1; index < path.points.length; index += 1) {
         const a = path.points[index - 1], b = path.points[index];
         length += Math.hypot(
           (b.x - a.x) * object.width / object.geometryWidth,
           (b.y - a.y) * object.height / object.geometryHeight
+        );
+      }
+      if (path.closed && path.points.length > 1) {
+        const first = path.points[0], last = path.points.at(-1);
+        length += Math.hypot(
+          (first.x - last.x) * object.width / object.geometryWidth,
+          (first.y - last.y) * object.height / object.geometryHeight
         );
       }
     }

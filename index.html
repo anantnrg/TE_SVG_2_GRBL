@@ -55,14 +55,14 @@
             <div class="field-grid"><label class="field">Travel speed <span class="input-unit"><input id="travel-feed" type="number" min="1" value="3000" step="100"><small>mm/min</small></span></label><label class="field">Drawing speed <span class="input-unit"><input id="draw-feed" type="number" min="1" value="1200" step="100"><small>mm/min</small></span></label></div>
             <label class="field">Curve tolerance <span class="input-unit"><input id="tolerance" type="number" min="0.01" max="5" step="0.01" value="0.25"><small>mm</small></span></label>
           </details>
-          <p class="machine-note">G-code uses millimetres and absolute coordinates. No machine connection is made.</p>
+          <p class="machine-note">Outlines only; fills and hatching are not plotted. G-code uses millimetres and absolute coordinates. No machine connection is made.</p>
         </section>
       </aside>
       <section class="editor" aria-label="Paper workspace">
         <div class="editor-toolbar"><div class="canvas-caption"><span class="status-dot"></span><strong id="canvas-caption">A4 · Portrait</strong><span id="canvas-dimensions">210 × 297 mm</span></div>
           <div class="view-controls"><button id="zoom-out" type="button" aria-label="Zoom out">−</button><span id="zoom-level">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button><span class="toolbar-divider"></span><button id="fit-sheet" class="fit-button" type="button">Fit sheet</button></div>
         </div>
-        <div id="canvas-viewport" class="canvas-viewport"><div id="canvas-stage" class="canvas-stage"><svg id="paper-canvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Paper sheet with arranged SVG artwork"></svg></div></div>
+        <div id="canvas-viewport" class="canvas-viewport"><div id="canvas-stage" class="canvas-stage"><canvas id="paper-canvas" role="img" aria-label="Paper sheet with arranged SVG artwork"></canvas></div></div>
         <footer class="canvas-footer"><span><kbd>Drag</kbd> to move <span class="footer-divider">·</span> <kbd>Wheel</kbd> to zoom</span><span id="coverage-label">0% geometry coverage</span></footer>
         <div id="warnings" class="warnings" role="status" aria-live="polite" hidden></div>
       </section>

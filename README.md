@@ -19,3 +19,7 @@ Open the local URL printed by the server. Paper.js and esbuild are bundled from 
 - `src/svg/` — SVG import and unsupported-content reporting
 - `src/gcode/` — plotter coordinate mapping and G-code output
 - `tests/` — offline unit tests
+
+The importer retains supported vector paths and reports unsupported SVG elements or effects instead of silently ignoring them. Artwork is plotted as path outlines only: fills, text, raster images, hatching, and plotter control are intentionally out of scope. Export is refused if any flattened path leaves the paper or configured machine area.
+
+Run `npm test` for document and exporter checks. The browser build bundles Paper.js locally, so the editor itself does not fetch any remote assets or make network requests.

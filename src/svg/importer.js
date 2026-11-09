@@ -68,12 +68,27 @@ function cleanSvg(source) {
   return { source: new XMLSerializer().serializeToString(parsed), width, height, warnings: [...warnings] };
 }
 
-function cubicAt(p0, p1, p2, p3, t) {
-  const mt = 1 - t;
-  return {
-    x: mt ** 3 * p0.x + 3 * mt ** 2 * t * p1.x + 3 * mt * t ** 2 * p2.x + t ** 3 * p3.x,
-    y: mt ** 3 * p0.y + 3 * mt ** 2 * t * p1.y + 3 * mt * t ** 2 * p2.y + t ** 3 * p3.y
-  };
+function midpoint(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function distanceToLine(point, start, end) {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return Math.hypot(point.x - start.x, point.y - start.y);
+  return Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x) / length;
+}
+
+function flattenCubic(p0, p1, p2, p3, tolerance, points, depth = 0) {
+  if (depth >= 16 || Math.max(distanceToLine(p1, p0, p3), distanceToLine(p2, p0, p3)) <= tolerance) {
+    points.push(p3);
+    return;
+  }
+  const p01 = midpoint(p0, p1), p12 = midpoint(p1, p2), p23 = midpoint(p2, p3);
+  const p012 = midpoint(p01, p12), p123 = midpoint(p12, p23);
+  const split = midpoint(p012, p123);
+  flattenCubic(p0, p01, p012, split, tolerance, points, depth + 1);
+  flattenCubic(split, p123, p23, p3, tolerance, points, depth + 1);
 }
 
 function transformedPoint(path, point) {
@@ -93,7 +108,7 @@ function collectPaths(item) {
     }
     const points = [];
     for (const curve of curves) {
-      const [a, b] = curve.segments;
+      const a = curve.segment1, b = curve.segment2;
       const p0 = transformedPoint(shape, a.point);
       const p1 = transformedPoint(shape, a.point.add(a.handleOut));
       const p3 = transformedPoint(shape, b.point);
@@ -159,10 +174,7 @@ export function flattenCubicPaths(paths, tolerance) {
     const points = [path.points[0]];
     for (let i = 1; i + 2 < path.points.length; i += 3) {
       const p0 = points.at(-1), p1 = path.points[i], p2 = path.points[i + 1], p3 = path.points[i + 2];
-      const chord = Math.hypot(p3.x - p0.x, p3.y - p0.y);
-      const polygon = Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p2.x - p1.x, p2.y - p1.y) + Math.hypot(p3.x - p2.x, p3.y - p2.y);
-      const steps = Math.max(2, Math.min(256, Math.ceil(Math.sqrt(Math.max(0, polygon - chord) / (8 * tolerance)) * 4)));
-      for (let step = 1; step <= steps; step += 1) points.push(cubicAt(p0, p1, p2, p3, step / steps));
+      flattenCubic(p0, p1, p2, p3, tolerance, points);
     }
     return { points, closed: path.closed };
   });
