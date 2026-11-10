@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#14191a">
+    <meta name="description" content="Arrange SVG artwork on a virtual sheet and export pen-plotter G-code, entirely offline.">
+    <title>TE SVG 2 GRBL</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script defer src="./dist/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="TE SVG 2 GRBL home">
+        <span class="brand-mark">TE</span><span>SVG <span class="muted">to</span> GRBL</span>
+      </a>
+      <div class="topbar-actions">
+        <button class="button notification-toggle" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-tray">
+          Notifications <span id="notification-count" class="notification-count" hidden>0</span>
+        </button>
+        <button class="button button-primary" id="export-button" type="button" disabled><span aria-hidden="true">↓</span> Export G-code</button>
+      </div>
+    </header>
+    <main class="workspace">
+      <aside class="sidebar">
+        <section class="panel-section">
+          <div class="section-heading"><div><span class="eyebrow">01 / ARTWORK</span><h1>Your designs</h1></div><button class="icon-button" id="add-files" type="button" title="Import SVG" aria-label="Import SVG">+</button></div>
+          <input id="file-input" type="file" accept=".svg,image/svg+xml" multiple hidden>
+          <div id="drop-zone" class="drop-zone" tabindex="0"><span class="upload-icon" aria-hidden="true">↥</span><strong>Drop SVG files here</strong><span>or <button class="text-button" id="browse-files" type="button">browse files</button></span></div>
+          <ul id="object-list" class="object-list" aria-label="Imported artwork"></ul><div id="empty-list" class="empty-note">Your artwork will appear here.</div>
+        </section>
+        <section class="panel-section">
+          <div class="section-heading compact"><div><span class="eyebrow">02 / SHEET</span><h2>Paper setup</h2></div></div>
+          <div class="field-grid">
+            <label class="field">Format<select id="paper-size"><option value="A4">A4 · 210 × 297 mm</option><option value="A3">A3 · 297 × 420 mm</option><option value="custom">Custom</option></select></label>
+            <label class="field">Orientation<select id="orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+          </div>
+          <div class="field-grid custom-size" id="custom-size" hidden>
+            <label class="field">Width <span class="input-unit"><input id="paper-width" type="number" min="10" max="2000" step="1" value="210"><small>mm</small></span></label>
+            <label class="field">Height <span class="input-unit"><input id="paper-height" type="number" min="10" max="2000" step="1" value="297"><small>mm</small></span></label>
+          </div>
+          <div class="paper-summary"><span>Working area</span><strong id="paper-summary">210 × 297 mm</strong></div>
+        </section>
+        <section class="panel-section">
+          <div class="section-heading compact"><div><span class="eyebrow">03 / SELECTED</span><h2>Object settings</h2></div></div>
+          <div id="no-selection" class="empty-note">Select an object to edit its position and size.</div>
+          <div id="object-properties" hidden>
+            <div class="field-grid"><label class="field">X position <span class="input-unit"><input id="pos-x" type="number" step="0.1"><small>mm</small></span></label><label class="field">Y position <span class="input-unit"><input id="pos-y" type="number" step="0.1"><small>mm</small></span></label></div>
+            <div class="field-grid dimensions-grid"><label class="field">Width <span class="input-unit"><input id="obj-width" type="number" min="0.1" step="0.1"><small>mm</small></span></label><button id="aspect-lock" class="lock-button" type="button" aria-pressed="true" title="Unlock aspect ratio">🔒</button><label class="field">Height <span class="input-unit"><input id="obj-height" type="number" min="0.1" step="0.1"><small>mm</small></span></label></div>
+            <label class="field">Rotation <span class="input-unit"><input id="obj-rotation" type="number" step="1"><small>°</small></span></label>
+            <div class="property-actions"><button id="rotate-left" class="button button-small" type="button" title="Rotate −90°">↶ 90°</button><button id="rotate-right" class="button button-small" type="button" title="Rotate +90°">↷ 90°</button><button id="duplicate-object" class="button button-small" type="button">Duplicate</button><button id="delete-object" class="button button-small button-danger" type="button">Delete</button></div>
+          </div>
+        </section>
+        <section class="panel-section machine-section">
+          <div class="section-heading compact"><div><span class="eyebrow">04 / PLOTTER</span><h2>Machine & pen</h2></div></div>
+          <div class="field-grid"><label class="field">Plotter width <span class="input-unit"><input id="machine-width" type="number" min="10" max="2000" value="210" step="1"><small>mm</small></span></label><label class="field">Plotter height <span class="input-unit"><input id="machine-height" type="number" min="10" max="2000" value="297" step="1"><small>mm</small></span></label></div>
+          <div class="field-grid"><label class="field">Origin<select id="origin"><option value="bottom-left">Bottom left</option><option value="top-left">Top left</option></select></label><label class="field">Y direction<select id="y-direction"><option value="up">Positive up</option><option value="down">Positive down</option></select></label></div>
+          <details class="advanced-settings"><summary>Advanced G-code settings</summary>
+            <div class="field-grid"><label class="field">Pen up Z <span class="input-unit"><input id="pen-up" type="number" step="0.1" value="5"><small>mm</small></span></label><label class="field">Pen down Z <span class="input-unit"><input id="pen-down" type="number" step="0.1" value="0"><small>mm</small></span></label></div>
+            <div class="field-grid"><label class="field">Travel speed <span class="input-unit"><input id="travel-feed" type="number" min="1" value="3000" step="100"><small>mm/min</small></span></label><label class="field">Drawing speed <span class="input-unit"><input id="draw-feed" type="number" min="1" value="1200" step="100"><small>mm/min</small></span></label></div>
+            <label class="field">Curve tolerance <span class="input-unit"><input id="tolerance" type="number" min="0.01" max="5" step="0.01" value="0.25"><small>mm</small></span></label>
+          </details>
+          <p class="machine-note">Outlines only; fills and hatching are not plotted. G-code uses millimetres and absolute coordinates. No machine connection is made.</p>
+        </section>
+      </aside>
+      <section class="editor" aria-label="Paper workspace">
+        <div class="editor-toolbar"><div class="canvas-caption"><span class="status-dot"></span><strong id="canvas-caption">A4 · Portrait</strong><span id="canvas-dimensions">210 × 297 mm</span></div>
+          <div class="view-controls"><button id="zoom-out" type="button" aria-label="Zoom out">−</button><span id="zoom-level">100%</span><button id="zoom-in" type="button" aria-label="Zoom in">+</button><span class="toolbar-divider"></span><button id="fit-sheet" class="fit-button" type="button">Fit sheet</button></div>
+        </div>
+        <div id="canvas-viewport" class="canvas-viewport"><div id="canvas-stage" class="canvas-stage"><canvas id="paper-canvas" role="img" aria-label="Paper sheet with arranged SVG artwork"></canvas></div></div>
+        <footer class="canvas-footer"><span><kbd>Drag</kbd> to move <span class="footer-divider">·</span> <kbd>Wheel</kbd> to zoom</span><span id="coverage-label">0% geometry coverage</span></footer>
+        <div id="warnings" class="warnings" role="status" aria-live="polite" hidden></div>
+      </section>
+    </main>
+    <aside id="notification-tray" class="notification-tray" aria-label="Notification history" hidden>
+      <div class="tray-heading"><div><span class="eyebrow">RECENT ACTIVITY</span><h2>Notifications</h2></div><button id="clear-notifications" class="text-button" type="button">Clear all</button></div>
+      <ol id="notification-list" class="notification-list"></ol>
+      <p id="empty-notifications" class="empty-note">No notifications yet.</p>
+    </aside>
+    <dialog id="export-dialog" class="export-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2>G-code exported</h2><p id="export-summary"></p><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="copy-gcode" class="button" type="button">Copy G-code</button><button id="download-again" class="button button-primary" type="button">Download again</button></div></dialog>
+  </body>
+</html>
