@@ -57,3 +57,8 @@ kbd{border-color:#3a4543;color:#b6c0ba;background:#252d2e}
 .notification-tray .empty-note{padding:16px 0}
 .dialog-actions{flex-wrap:wrap}
 @media(max-width:900px){.notification-tray{top:73px;right:12px}}
+.export-dialog{width:min(920px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
+.gcode-preview{display:block;width:100%;height:min(55vh,520px);min-height:180px;resize:vertical;overflow:auto;padding:14px;border:1px solid #3a4543;border-radius:7px;color:#dce5df;background:#151b1c;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}
+.gcode-preview:focus{outline:2px solid var(--accent);outline-offset:2px}
+.preview-label{display:block;margin:15px 0 7px;color:#b4beb8;font-size:11px;font-weight:600}
+@media(max-width:600px){.gcode-preview{height:45vh;min-height:150px;padding:10px;font-size:11px}.export-dialog{padding:22px}}

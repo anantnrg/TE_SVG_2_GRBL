@@ -77,6 +77,6 @@
       <ol id="notification-list" class="notification-list"></ol>
       <p id="empty-notifications" class="empty-note">No notifications yet.</p>
     </aside>
-    <dialog id="export-dialog" class="export-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2>G-code exported</h2><p id="export-summary"></p><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="copy-gcode" class="button" type="button">Copy G-code</button><button id="download-again" class="button button-primary" type="button">Download again</button></div></dialog>
+    <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title" aria-describedby="export-summary"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2 id="export-title">Review G-code</h2><p id="export-summary"></p><label class="preview-label" for="gcode-preview">Generated G-code</label><textarea id="gcode-preview" class="gcode-preview" readonly spellcheck="false" aria-label="Read-only G-code preview"></textarea><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="copy-gcode" class="button" type="button">Copy G-code</button><button id="download-gcode" class="button button-primary" type="button">Download G-code</button></div></dialog>
   </body>
 </html>
