@@ -15,11 +15,10 @@ The initial dependency installation needs an internet connection to download Pap
 git clone https://github.com/anantnrg/TE_SVG_2_GRBL.git
 cd TE_SVG_2_GRBL
 npm install
-npm run build
 npm run serve
 ```
 
-Open **http://127.0.0.1:4173/**, or use the local URL printed by the server. Paper.js is bundled from the local dependencies into `dist/app.js`; `dist/` is generated and intentionally ignored. Keep the server running while using the app. Stop it with **Ctrl+C** in the terminal.
+`npm run serve` builds the Paper.js application bundle into `dist/app.js` before starting the server; `dist/` is generated and intentionally ignored. Open **http://127.0.0.1:4173/**, or use the local URL printed by the server. Keep the server running while using the app. Stop it with **Ctrl+C** in the terminal.
 
 To run the tests:
 
@@ -30,7 +29,7 @@ npm test
 ### Troubleshooting
 
 - If `npm install` fails, check your internet connection and retry.
-- If the build reports that esbuild is unavailable, run `npm install` again, then `npm run build`.
+- If the build reports that esbuild or Paper.js is unavailable, run `npm install` again, then `npm run serve`.
 - If port 4173 is already in use, start the server on another port, for example `PORT=4174 npm run serve`, and open **http://127.0.0.1:4174/**.
 
 ## Project layout

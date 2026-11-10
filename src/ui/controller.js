@@ -99,7 +99,7 @@ export class AppController {
       this.renderNotifications();
     });
     byId("close-export").addEventListener("click", () => byId("export-dialog").close());
-    byId("download-again").addEventListener("click", () => this.download());
+    byId("download-gcode").addEventListener("click", () => this.download());
     byId("copy-gcode").addEventListener("click", () => this.copyGcode());
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#notification-tray, #notification-toggle")) this.toggleNotifications(false);
@@ -199,11 +199,11 @@ export class AppController {
   export() {
     try {
       this.lastGcode = generateGcode(this.model.objects, this.config());
+      byId("gcode-preview").value = this.lastGcode;
       const paths = (this.lastGcode.match(/G1 X/g) ?? []).length;
       byId("export-summary").textContent = `${paths.toLocaleString()} drawing moves · ${this.model.objects.length} object${this.model.objects.length === 1 ? "" : "s"} · ${this.model.width} × ${this.model.height} mm. Review machine limits and pen travel before plotting.`;
-      this.download();
       byId("export-dialog").showModal();
-      this.showWarning("G-code file download started. You can also copy the G-code from the export dialog.");
+      this.showWarning("G-code generated and ready to review.");
     } catch (error) {
       this.showWarning(error.message, true);
     }
@@ -211,13 +211,18 @@ export class AppController {
 
   download() {
     if (!this.lastGcode) return;
-    const blob = new Blob([this.lastGcode], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "te-svg-2-grbl.gcode";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try {
+      const blob = new Blob([this.lastGcode], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "te-svg-2-grbl.gcode";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.showWarning("G-code download started.");
+    } catch (error) {
+      this.showWarning(`Could not download G-code: ${error.message}`, true);
+    }
   }
 
   async copyGcode() {
