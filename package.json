@@ -7,7 +7,7 @@
   "scripts": {
     "build": "esbuild src/main.js --bundle --platform=browser --target=es2020 --outfile=dist/app.js",
     "test": "node --test",
-    "serve": "node tools/server.js"
+    "serve": "npm run build && node tools/server.js"
   },
   "dependencies": {
     "paper": "^0.12.18"
