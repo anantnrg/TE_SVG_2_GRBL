@@ -49,6 +49,16 @@ test("centerline tracing reduces a thick line to one open path", () => {
   assert.doesNotMatch(trace.svg, /fill="#000"/);
 });
 
+test("centerline tracing preserves a branch without duplicate diagonal segments", () => {
+  const points = [];
+  for (let y = 5; y <= 7; y += 1) for (let x = 5; x <= 19; x += 1) points.push([x, y]);
+  for (let y = 5; y <= 19; y += 1) for (let x = 11; x <= 13; x += 1) points.push([x, y]);
+  const trace = traceImage(raster(25, 25, points), 25, 25, { mode: "centerline", threshold: 128 });
+
+  assert.equal(trace.paths.length, 3);
+  assert.ok(trace.paths.every(({ points: line }) => line.length > 3));
+});
+
 test("outline tracing follows both boundaries of a filled logo and emits curves", () => {
   const points = [];
   for (let y = 1; y <= 9; y += 1) {

@@ -72,6 +72,7 @@ function neighborsOf(index, binary, width, height, visit) {
     const [dx, dy] = NEIGHBORS[direction];
     const nx = x + dx, ny = y + dy;
     if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+    if (dx && dy && (binary[y * width + nx] || binary[ny * width + x])) continue;
     const next = ny * width + nx;
     if (binary[next]) visit(next, direction);
   }
