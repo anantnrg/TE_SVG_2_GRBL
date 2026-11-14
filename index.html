@@ -24,9 +24,9 @@
     <main class="workspace">
       <aside class="sidebar">
         <section class="panel-section">
-          <div class="section-heading"><div><span class="eyebrow">01 / ARTWORK</span><h1>Your designs</h1></div><button class="icon-button" id="add-files" type="button" title="Import SVG" aria-label="Import SVG">+</button></div>
-          <input id="file-input" type="file" accept=".svg,image/svg+xml" multiple hidden>
-          <div id="drop-zone" class="drop-zone" tabindex="0"><span class="upload-icon" aria-hidden="true">↥</span><strong>Drop SVG files here</strong><span>or <button class="text-button" id="browse-files" type="button">browse files</button></span></div>
+          <div class="section-heading"><div><span class="eyebrow">01 / ARTWORK</span><h1>Your designs</h1></div><button class="icon-button" id="add-files" type="button" title="Import artwork" aria-label="Import artwork">+</button></div>
+          <input id="file-input" type="file" accept=".svg,image/svg+xml,.png,image/png,.jpg,.jpeg,image/jpeg" multiple hidden>
+          <div id="drop-zone" class="drop-zone" tabindex="0"><span class="upload-icon" aria-hidden="true">↥</span><strong>Drop SVG or image files here</strong><span>or <button class="text-button" id="browse-files" type="button">browse files</button></span></div>
           <ul id="object-list" class="object-list" aria-label="Imported artwork"></ul><div id="empty-list" class="empty-note">Your artwork will appear here.</div>
         </section>
         <section class="panel-section">
@@ -77,6 +77,22 @@
       <ol id="notification-list" class="notification-list"></ol>
       <p id="empty-notifications" class="empty-note">No notifications yet.</p>
     </aside>
+    <dialog id="image-trace-dialog" class="image-trace-dialog" aria-labelledby="image-trace-title" aria-describedby="image-trace-help">
+      <header class="image-trace-heading"><div><span class="eyebrow">IMAGE TO VECTOR</span><h2 id="image-trace-title">Trace image</h2></div><button id="image-trace-close" class="icon-button" type="button" aria-label="Cancel image trace">×</button></header>
+      <p id="image-trace-help">Adjust the threshold and tracing mode, then review the vector preview before adding it to your sheet.</p>
+      <div class="trace-controls">
+        <label class="field trace-threshold">Threshold <output id="trace-threshold-value" for="trace-threshold">128</output><input id="trace-threshold" type="range" min="0" max="255" value="128"></label>
+        <label class="field">Tracing mode<select id="trace-mode"><option value="centerline">Centerline (single stroke)</option><option value="outline">Outline (filled regions)</option></select></label>
+        <label class="trace-toggle"><input id="trace-grayscale" type="checkbox" checked> Convert to grayscale</label>
+        <label class="trace-toggle"><input id="trace-invert" type="checkbox"> Invert light and dark</label>
+        <label class="trace-toggle"><input id="trace-despeckle" type="checkbox"> Remove small specks</label>
+        <label class="field trace-speck-size">Maximum speck size <output id="trace-speck-value" for="trace-speck-size">3 px</output><input id="trace-speck-size" type="range" min="1" max="50" value="3" disabled></label>
+      </div>
+      <div class="trace-preview-frame"><canvas id="image-trace-preview" aria-label="Live vector trace preview"></canvas></div>
+      <p id="image-trace-status" class="trace-status" role="status" aria-live="polite"></p>
+      <p id="image-trace-error" class="trace-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="image-trace-cancel" class="button" type="button">Cancel</button><button id="image-trace-insert" class="button button-primary" type="button" disabled>Add vector artwork</button></div>
+    </dialog>
     <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title" aria-describedby="export-summary"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Close">×</button></form><span class="eyebrow">READY TO PLOT</span><h2 id="export-title">Review G-code</h2><p id="export-summary"></p><label class="preview-label" for="gcode-preview">Generated G-code</label><textarea id="gcode-preview" class="gcode-preview" readonly spellcheck="false" aria-label="Read-only G-code preview"></textarea><div class="dialog-actions"><button id="close-export" class="button" type="button">Back to sheet</button><button id="copy-gcode" class="button" type="button">Copy G-code</button><button id="download-gcode" class="button button-primary" type="button">Download G-code</button></div></dialog>
   </body>
 </html>

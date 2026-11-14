@@ -1,6 +1,7 @@
 import paper from "paper";
 import { DocumentModel, paperDimensions } from "../document/model.js";
 import { importSvg } from "../svg/importer.js";
+import { traceImage } from "../image/tracer.js";
 import { estimateCoverage, generateGcode } from "../gcode/exporter.js";
 import { PaperCanvas } from "./paper-canvas.js";
 import { NotificationHistory } from "./notification-history.js";
@@ -24,6 +25,8 @@ export class AppController {
     this.notifications = new NotificationHistory();
     this.activeWarning = "";
     this.warningTimer = null;
+    this.pendingImageTrace = null;
+    this.pendingImageTraceResolve = null;
     this.canvas.aspectLocked = () => this.aspectLocked;
     this.bindEvents();
     this.update();
@@ -54,6 +57,23 @@ export class AppController {
       dropZone.classList.remove("drag-over");
     });
     dropZone.addEventListener("drop", async (event) => this.importFiles([...event.dataTransfer.files]));
+
+    for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size"]) {
+      byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" ? "input" : "change", () => this.updateImageTracePreview());
+    }
+    byId("trace-despeckle").addEventListener("change", () => {
+      byId("trace-speck-size").disabled = !byId("trace-despeckle").checked;
+    });
+    byId("image-trace-cancel").addEventListener("click", () => this.finishImageTrace(false));
+    byId("image-trace-close").addEventListener("click", () => this.finishImageTrace(false));
+    byId("image-trace-insert").addEventListener("click", () => this.insertImageTrace());
+    byId("image-trace-dialog").addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.finishImageTrace(false);
+    });
+    byId("image-trace-dialog").addEventListener("close", () => {
+      if (this.pendingImageTraceResolve) this.finishImageTrace(false);
+    });
 
     byId("paper-size").addEventListener("change", () => {
       byId("custom-size").hidden = byId("paper-size").value !== "custom";
@@ -120,15 +140,21 @@ export class AppController {
     if (!files.length) return;
     const errors = [];
     for (const file of files) {
-      if (!/\.svg$/i.test(file.name) && file.type !== "image/svg+xml") {
-        errors.push(`${file.name}: only SVG vector files are supported.`);
+      const isSvg = /\.svg$/i.test(file.name) || file.type === "image/svg+xml";
+      const isRaster = /\.(png|jpe?g)$/i.test(file.name) || ["image/png", "image/jpeg"].includes(file.type);
+      if (!isSvg && !isRaster) {
+        errors.push(`${file.name}: only SVG, PNG, and JPEG files are supported.`);
         continue;
       }
       try {
-        const object = importSvg(await file.text(), file.name.replace(/\.svg$/i, ""), this.paperScope.project);
-        object.x = Math.min(10, Math.max(0, this.model.width - object.width));
-        object.y = Math.min(10, Math.max(0, this.model.height - object.height));
-        this.model.add(object);
+        if (isRaster) {
+          await this.openImageTrace(file);
+        } else {
+          const object = importSvg(await file.text(), file.name.replace(/\.svg$/i, ""), this.paperScope.project);
+          object.x = Math.min(10, Math.max(0, this.model.width - object.width));
+          object.y = Math.min(10, Math.max(0, this.model.height - object.height));
+          this.model.add(object);
+        }
       } catch (error) {
         errors.push(`${file.name}: ${error.message}`);
         if (error.warnings) errors.push(...error.warnings.map((warning) => `${file.name}: ${warning}`));
@@ -136,6 +162,125 @@ export class AppController {
     }
     this.update();
     if (errors.length) this.showWarning(errors.join(" "), true);
+  }
+
+  async openImageTrace(file) {
+    if (typeof createImageBitmap !== "function") {
+      throw new Error("This browser cannot decode local images for tracing.");
+    }
+    const bitmap = await createImageBitmap(file);
+    try {
+      if (bitmap.width * bitmap.height > 4_000_000) {
+        throw new RangeError("Images larger than 4 megapixels are not supported. Resize the image and try again.");
+      }
+      const source = document.createElement("canvas");
+      source.width = bitmap.width;
+      source.height = bitmap.height;
+      const context = source.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("Could not create an image-processing canvas.");
+      context.drawImage(bitmap, 0, 0);
+      const imageData = context.getImageData(0, 0, bitmap.width, bitmap.height);
+      this.pendingImageTrace = { file, width: bitmap.width, height: bitmap.height, pixels: imageData.data, trace: null };
+    } finally {
+      bitmap.close();
+    }
+
+    byId("trace-threshold").value = "128";
+    byId("trace-threshold-value").textContent = "128";
+    byId("trace-mode").value = "centerline";
+    byId("trace-grayscale").checked = true;
+    byId("trace-invert").checked = false;
+    byId("trace-despeckle").checked = false;
+    byId("trace-speck-size").value = "3";
+    byId("trace-speck-size").disabled = true;
+    byId("image-trace-error").hidden = true;
+    byId("image-trace-dialog").showModal();
+    this.updateImageTracePreview();
+    return new Promise((resolve) => { this.pendingImageTraceResolve = resolve; });
+  }
+
+  imageTraceOptions() {
+    return {
+      threshold: Number(byId("trace-threshold").value),
+      mode: byId("trace-mode").value,
+      grayscale: byId("trace-grayscale").checked,
+      invert: byId("trace-invert").checked,
+      despeckle: byId("trace-despeckle").checked,
+      maxSpeckArea: Number(byId("trace-speck-size").value)
+    };
+  }
+
+  updateImageTracePreview() {
+    const pending = this.pendingImageTrace;
+    if (!pending) return;
+    byId("trace-threshold-value").textContent = byId("trace-threshold").value;
+    byId("trace-speck-value").textContent = `${byId("trace-speck-size").value} px`;
+    const canvas = byId("image-trace-preview");
+    const context = canvas.getContext("2d");
+    const status = byId("image-trace-status");
+    const error = byId("image-trace-error");
+    const addButton = byId("image-trace-insert");
+    try {
+      const trace = traceImage(pending.pixels, pending.width, pending.height, this.imageTraceOptions());
+      pending.trace = trace;
+      canvas.width = pending.width;
+      canvas.height = pending.height;
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.beginPath();
+      for (const path of trace.paths) {
+        context.moveTo(path.points[0].x, path.points[0].y);
+        for (const point of path.points.slice(1)) context.lineTo(point.x, point.y);
+        if (path.closed) context.closePath();
+      }
+      context.fillStyle = "#09090b";
+      if (trace.mode === "outline") context.fill("evenodd");
+      context.strokeStyle = "#09090b";
+      context.lineWidth = trace.mode === "centerline" ? 1.25 : 0.6;
+      context.stroke();
+      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px · ${trace.paths.length} ${trace.paths.length === 1 ? "path" : "paths"}`;
+      error.hidden = true;
+      addButton.disabled = false;
+    } catch (traceError) {
+      pending.trace = null;
+      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px`;
+      error.textContent = traceError.message;
+      error.hidden = false;
+      addButton.disabled = true;
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+
+  insertImageTrace() {
+    const pending = this.pendingImageTrace;
+    if (!pending?.trace) return;
+    try {
+      const name = pending.file.name.replace(/\.(png|jpe?g)$/i, "");
+      const object = importSvg(pending.trace.svg, name, this.paperScope.project);
+      const availableWidth = Math.max(0.1, this.model.width - Math.min(20, this.model.width * 0.1));
+      const availableHeight = Math.max(0.1, this.model.height - Math.min(20, this.model.height * 0.1));
+      const scale = Math.min(1, availableWidth / object.width, availableHeight / object.height);
+      object.width *= scale;
+      object.height *= scale;
+      object.x = Math.min(10, Math.max(0, this.model.width - object.width));
+      object.y = Math.min(10, Math.max(0, this.model.height - object.height));
+      this.model.add(object);
+      this.update();
+      this.showWarning(`Traced ${pending.file.name} into editable vector artwork.`);
+      this.finishImageTrace(true);
+    } catch (error) {
+      this.showWarning(`Could not import traced image: ${error.message}`, true);
+    }
+  }
+
+  finishImageTrace(accepted) {
+    const resolve = this.pendingImageTraceResolve;
+    this.pendingImageTraceResolve = null;
+    this.pendingImageTrace = null;
+    resolve?.(accepted);
+    const dialog = byId("image-trace-dialog");
+    if (dialog.open) dialog.close();
   }
 
   applyPaperSettings() {

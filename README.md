@@ -36,10 +36,13 @@ npm test
 
 - `src/ui/` — DOM controls and canvas view
 - `src/document/` — sheet model and object transforms
+- `src/image/` — offline raster thresholding, cleanup, and vector tracing
 - `src/svg/` — SVG import and unsupported-content reporting
 - `src/gcode/` — plotter coordinate mapping and G-code output
 - `tests/` — offline unit tests
 
-The importer retains supported vector paths and reports unsupported SVG elements or effects instead of silently ignoring them. Artwork is plotted as path outlines only: fills, text, raster images, hatching, and plotter control are intentionally out of scope. Export is refused if any flattened path leaves the paper or configured machine area.
+SVG artwork retains supported vector paths and reports unsupported elements or effects instead of silently ignoring them. PNG and JPEG files can be traced into editable vector artwork before insertion. The trace dialog offers threshold, inversion, grayscale, and small-speck removal controls, plus centerline tracing for single-stroke line art or outline tracing for filled regions. Image processing is local and offline; images above 4 megapixels are rejected. Centerline tracing is best for clean, narrow strokes, while rasterized outlines are approximations and overly detailed outlines are rejected rather than exhausting memory. G-code export continues to use the same vector paths for both imported SVG and traced images; fills, text, hatching, and plotter control are not generated.
+
+Export is refused if any flattened path leaves the paper or configured machine area.
 
 Run `npm test` for document and exporter checks. The browser build bundles Paper.js locally, so the editor itself does not fetch any remote assets or make network requests.
