@@ -13,4 +13,4 @@ fi
 
 cd "$crate"
 wasm-pack build --target web --release --out-dir "${root}/assets/wasm/vtracer"
-printf '*.d.ts\n' > "${root}/assets/wasm/vtracer/.gitignore"
+printf '*.d.ts\npackage.json\n' > "${root}/assets/wasm/vtracer/.gitignore"

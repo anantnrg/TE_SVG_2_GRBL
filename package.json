@@ -5,7 +5,7 @@
   "description": "Offline SVG layout and GRBL G-code generator for pen plotters",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --platform=browser --target=es2020 --outfile=dist/app.js",
+    "build": "esbuild src/main.js --bundle --platform=browser --target=es2020 --outfile=dist/app.js && esbuild src/image/trace-worker.js --bundle --platform=browser --target=es2020 --format=esm --outfile=dist/image-trace-worker.js",
     "test": "node --test",
     "serve": "npm run build && node tools/server.js"
   },

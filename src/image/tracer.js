@@ -3,7 +3,7 @@ const NEIGHBORS = [
   [1, 1], [0, 1], [-1, 1], [-1, 0]
 ];
 
-function validateRaster(rgba, width, height) {
+export function validateRaster(rgba, width, height) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
       width * height > 4_000_000 || rgba.length !== width * height * 4) {
     throw new RangeError("Image dimensions or pixel data are not supported.");
@@ -45,7 +45,7 @@ export function thresholdImage(rgba, width, height, {
   invert = false,
   grayscale = true,
   despeckle = false,
-  maxSpeckArea = 3
+  maxSpeckArea = 9
 } = {}) {
   validateRaster(rgba, width, height);
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 255) {
@@ -66,7 +66,31 @@ export function thresholdImage(rgba, width, height, {
   return despeckle ? removeSmallComponents(binary, width, height, maxSpeckArea) : binary;
 }
 
-function neighborsOf(index, binary, width, height, visit) {
+export function prepareVectorPixels(rgba, width, height, { grayscale = true, invert = false } = {}) {
+  validateRaster(rgba, width, height);
+  const pixels = new Uint8Array(rgba.length);
+  for (let offset = 0; offset < rgba.length; offset += 4) {
+    const alpha = rgba[offset + 3] / 255;
+    let red = rgba[offset] * alpha + 255 * (1 - alpha);
+    let green = rgba[offset + 1] * alpha + 255 * (1 - alpha);
+    let blue = rgba[offset + 2] * alpha + 255 * (1 - alpha);
+    if (grayscale) {
+      red = green = blue = Math.round(red * 0.2126 + green * 0.7152 + blue * 0.0722);
+    }
+    if (invert) {
+      red = 255 - red;
+      green = 255 - green;
+      blue = 255 - blue;
+    }
+    pixels[offset] = red;
+    pixels[offset + 1] = green;
+    pixels[offset + 2] = blue;
+    pixels[offset + 3] = 255;
+  }
+  return pixels;
+}
+
+function forEachNeighbor(index, binary, width, height, visit) {
   const x = index % width, y = Math.floor(index / width);
   for (let direction = 0; direction < NEIGHBORS.length; direction += 1) {
     const [dx, dy] = NEIGHBORS[direction];
@@ -78,52 +102,92 @@ function neighborsOf(index, binary, width, height, visit) {
   }
 }
 
-function skeletonize(binary, width, height) {
-  const skeleton = Uint8Array.from(binary);
-  const marked = [];
-  let changed = true, iteration = 0;
-  while (changed && iteration < 64) {
+function pixelDegree(index, binary, width, height) {
+  let count = 0;
+  forEachNeighbor(index, binary, width, height, () => { count += 1; });
+  return count;
+}
+
+function pruneShortTerminalBranches(binary, width, height, maxLength) {
+  if (!Number.isInteger(maxLength) || maxLength < 0) {
+    throw new RangeError("Branch pruning length must be a non-negative integer.");
+  }
+  if (maxLength === 0) return binary;
+  let changed = true;
+  while (changed) {
     changed = false;
-    iteration += 1;
-    for (let step = 0; step < 2; step += 1) {
-      marked.length = 0;
-      for (let y = 1; y < height - 1; y += 1) {
-        for (let x = 1; x < width - 1; x += 1) {
-          const index = y * width + x;
-          if (!skeleton[index]) continue;
-          const p = [
-            skeleton[index - width],
-            skeleton[index - width + 1],
-            skeleton[index + 1],
-            skeleton[index + width + 1],
-            skeleton[index + width],
-            skeleton[index + width - 1],
-            skeleton[index - 1],
-            skeleton[index - width - 1]
-          ];
-          const count = p.reduce((sum, value) => sum + value, 0);
-          if (count < 2 || count > 6) continue;
-          let transitions = 0;
-          for (let neighbor = 0; neighbor < 8; neighbor += 1) {
-            if (!p[neighbor] && p[(neighbor + 1) % 8]) transitions += 1;
+    for (let endpoint = 0; endpoint < binary.length; endpoint += 1) {
+      if (!binary[endpoint] || pixelDegree(endpoint, binary, width, height) !== 1) continue;
+      const branch = [endpoint];
+      let previous = endpoint, current = -1;
+      forEachNeighbor(endpoint, binary, width, height, (next) => { current = next; });
+      while (current >= 0) {
+        const degree = pixelDegree(current, binary, width, height);
+        if (degree !== 2) {
+          if (degree >= 3 && branch.length <= maxLength) {
+            for (const index of branch) binary[index] = 0;
+            changed = true;
           }
-          if (transitions !== 1) continue;
-          const [north, , east, , south, , west] = p;
-          if (step === 0 ? north * east * south || east * south * west : north * east * west || north * south * west) continue;
-          marked.push(index);
+          break;
         }
-      }
-      if (marked.length) {
-        changed = true;
-        for (const index of marked) skeleton[index] = 0;
+        branch.push(current);
+        let next = -1;
+        forEachNeighbor(current, binary, width, height, (candidate) => {
+          if (candidate !== previous) next = candidate;
+        });
+        previous = current;
+        current = next;
       }
     }
   }
-  if (changed) throw new Error("Centerline tracing did not converge. Resize the image or use outline tracing.");
-  return skeleton;
+  return binary;
 }
 
-function traceSkeleton(binary, width, height) {
+function simplifyOpenPath(points, tolerance) {
+  if (tolerance <= 0 || points.length < 3) return points;
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack = [[0, points.length - 1]];
+  while (stack.length) {
+    const [start, end] = stack.pop();
+    const a = points[start], b = points[end];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    let maximum = tolerance, selected = -1;
+    for (let index = start + 1; index < end; index += 1) {
+      const point = points[index];
+      const distance = length === 0
+        ? Math.hypot(point.x - a.x, point.y - a.y)
+        : Math.abs(dy * point.x - dx * point.y + b.x * a.y - b.y * a.x) / length;
+      if (distance > maximum) {
+        maximum = distance;
+        selected = index;
+      }
+    }
+    if (selected >= 0) {
+      keep[selected] = 1;
+      stack.push([start, selected], [selected, end]);
+    }
+  }
+  return points.filter((_, index) => keep[index]);
+}
+
+function pathData(points, closed) {
+  if (points.length < 2) return "";
+  const commands = points.slice(1).map(({ x, y }) => `L${x.toFixed(2)} ${y.toFixed(2)}`).join("");
+  return `M${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}${commands}${closed ? "Z" : ""}`;
+}
+
+export function traceSkeleton(skeleton, width, height, {
+  branchPruneLength = 0,
+  smoothing = 0
+} = {}) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || skeleton.length !== width * height) {
+    throw new RangeError("Skeleton dimensions or pixel data are not supported.");
+  }
+  const binary = Uint8Array.from(skeleton, (pixel) => Number(pixel !== 0));
+  pruneShortTerminalBranches(binary, width, height, branchPruneLength);
   const visited = new Uint8Array(binary.length);
   const paths = [];
   const markEdge = (from, direction, to) => {
@@ -131,20 +195,15 @@ function traceSkeleton(binary, width, height) {
     visited[to] |= 1 << ((direction + 4) % 8);
   };
   const edgeVisited = (from, direction) => Boolean(visited[from] & (1 << direction));
-  const degree = (index) => {
-    let count = 0;
-    neighborsOf(index, binary, width, height, () => { count += 1; });
-    return count;
-  };
   const walk = (start, first, firstDirection) => {
     const indexes = [start];
     let previous = start, current = first, direction = firstDirection;
     markEdge(previous, direction, current);
     indexes.push(current);
     let closed = false;
-    while (degree(current) === 2) {
+    while (pixelDegree(current, binary, width, height) === 2) {
       let next = -1, nextDirection = -1;
-      neighborsOf(current, binary, width, height, (candidate, candidateDirection) => {
+      forEachNeighbor(current, binary, width, height, (candidate, candidateDirection) => {
         if (candidate !== previous) {
           next = candidate;
           nextDirection = candidateDirection;
@@ -161,8 +220,12 @@ function traceSkeleton(binary, width, height) {
       indexes.push(current);
     }
     if (indexes.length > 1) {
+      const points = indexes.map((index) => ({
+        x: index % width + 0.5,
+        y: Math.floor(index / width) + 0.5
+      }));
       paths.push({
-        points: indexes.map((index) => ({ x: index % width + 0.5, y: Math.floor(index / width) + 0.5 })),
+        points: closed ? points : simplifyOpenPath(points, smoothing),
         closed
       });
     }
@@ -170,132 +233,31 @@ function traceSkeleton(binary, width, height) {
 
   for (let index = 0; index < binary.length; index += 1) {
     if (!binary[index]) continue;
-    const nodeDegree = degree(index);
-    if (nodeDegree === 0) continue;
-    if (nodeDegree === 2) continue;
-    neighborsOf(index, binary, width, height, (next, direction) => {
+    const degree = pixelDegree(index, binary, width, height);
+    if (degree === 0 || degree === 2) continue;
+    forEachNeighbor(index, binary, width, height, (next, direction) => {
       if (!edgeVisited(index, direction)) walk(index, next, direction);
     });
   }
   for (let index = 0; index < binary.length; index += 1) {
     if (!binary[index]) continue;
-    neighborsOf(index, binary, width, height, (next, direction) => {
+    forEachNeighbor(index, binary, width, height, (next, direction) => {
       if (!edgeVisited(index, direction)) walk(index, next, direction);
     });
   }
   return paths;
 }
 
-function edgeKey(x, y) {
-  return `${x},${y}`;
-}
-
-function traceBoundaries(binary, width, height) {
-  const edges = [];
-  const outgoing = new Map();
-  const add = (x1, y1, x2, y2, direction) => {
-    if (edges.length >= 200_000) {
-      throw new Error("This image has too much outline detail to trace. Resize it or remove small details and try again.");
-    }
-    const edge = { x1, y1, x2, y2, direction, start: edgeKey(x1, y1) };
-    const index = edges.push(edge) - 1;
-    if (!outgoing.has(edge.start)) outgoing.set(edge.start, []);
-    outgoing.get(edge.start).push(index);
-  };
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (!binary[y * width + x]) continue;
-      if (y === 0 || !binary[(y - 1) * width + x]) add(x, y, x + 1, y, 0);
-      if (x === width - 1 || !binary[y * width + x + 1]) add(x + 1, y, x + 1, y + 1, 1);
-      if (y === height - 1 || !binary[(y + 1) * width + x]) add(x + 1, y + 1, x, y + 1, 2);
-      if (x === 0 || !binary[y * width + x - 1]) add(x, y + 1, x, y, 3);
-    }
-  }
-  const used = new Uint8Array(edges.length);
-  const contours = [];
-  for (let initial = 0; initial < edges.length; initial += 1) {
-    if (used[initial]) continue;
-    const points = [];
-    let edgeIndex = initial;
-    const start = edges[initial].start;
-    while (!used[edgeIndex]) {
-      const edge = edges[edgeIndex];
-      used[edgeIndex] = 1;
-      points.push({ x: edge.x1, y: edge.y1 });
-      const end = edgeKey(edge.x2, edge.y2);
-      if (end === start) break;
-      const candidates = (outgoing.get(end) ?? []).filter((candidate) => !used[candidate]);
-      if (!candidates.length) break;
-      const turnPriority = [1, 0, 3, 2];
-      candidates.sort((a, b) => {
-        const turnA = (edges[a].direction - edge.direction + 4) % 4;
-        const turnB = (edges[b].direction - edge.direction + 4) % 4;
-        return turnPriority.indexOf(turnA) - turnPriority.indexOf(turnB);
-      });
-      edgeIndex = candidates[0];
-    }
-    if (points.length >= 3 && edgeKey(points.at(-1).x, points.at(-1).y) !== start) {
-      const finalEdge = edges[edgeIndex];
-      if (finalEdge && edgeKey(finalEdge.x2, finalEdge.y2) !== start) continue;
-    }
-    if (points.length >= 3) contours.push(simplifyContour(points));
-  }
-  return contours.filter((contour) => contour.length >= 3);
-}
-
-function simplifyContour(points) {
-  const simplified = [];
-  for (let index = 0; index < points.length; index += 1) {
-    const previous = points[(index + points.length - 1) % points.length];
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    const cross = (current.x - previous.x) * (next.y - current.y) -
-      (current.y - previous.y) * (next.x - current.x);
-    if (cross !== 0) simplified.push(current);
-  }
-  return simplified;
-}
-
-function svgPathData(points) {
-  if (points.length < 3) return "";
-  const controls = points.map((point, index) => {
-    const previous = points[(index + points.length - 1) % points.length];
-    const next = points[(index + 1) % points.length];
-    return {
-      incoming: {
-        x: point.x - (next.x - previous.x) / 12,
-        y: point.y - (next.y - previous.y) / 12
-      },
-      outgoing: {
-        x: point.x + (next.x - previous.x) / 12,
-        y: point.y + (next.y - previous.y) / 12
-      }
-    };
-  });
-  let data = `M ${points[0].x} ${points[0].y}`;
-  for (let index = 0; index < points.length; index += 1) {
-    const next = (index + 1) % points.length;
-    data += ` C ${controls[index].outgoing.x} ${controls[index].outgoing.y} ${controls[next].incoming.x} ${controls[next].incoming.y} ${points[next].x} ${points[next].y}`;
-  }
-  return `${data} Z`;
-}
-
-function makeSvg(paths, width, height, mode) {
+export function makeCenterlineSvg(paths, width, height) {
   const body = paths.map(({ points, closed }) => {
-    const commands = `M ${points[0].x} ${points[0].y}${points.slice(1).map(({ x, y }) => ` L ${x} ${y}`).join("")}${closed ? " Z" : ""}`;
-    if (mode === "outline") return `<path d="${svgPathData(points)}" fill="#000" fill-rule="evenodd"/>`;
-    return `<path d="${commands}" fill="none" stroke="#000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>`;
+    const d = pathData(points, closed);
+    return `<path d="${d}" fill="none" stroke="#000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>`;
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}px" height="${height}px" viewBox="0 0 ${width} ${height}">${body}</svg>`;
 }
 
-export function traceImage(rgba, width, height, options = {}) {
-  const binary = thresholdImage(rgba, width, height, options);
-  const mode = options.mode ?? "centerline";
-  if (!["centerline", "outline"].includes(mode)) throw new RangeError("Trace mode must be centerline or outline.");
-  const paths = mode === "centerline"
-    ? traceSkeleton(skeletonize(binary, width, height), width, height)
-    : traceBoundaries(binary, width, height).map((points) => ({ points, closed: true }));
-  if (!paths.length) throw new Error("No traceable artwork was found. Adjust the threshold or image settings.");
-  return { paths, svg: makeSvg(paths, width, height, mode), width, height, mode };
+export function buildCenterlineTrace(skeleton, width, height, options = {}) {
+  const paths = traceSkeleton(skeleton, width, height, options);
+  if (!paths.length) throw new Error("No traceable centerline was found. Adjust threshold or noise settings.");
+  return { paths, svg: makeCenterlineSvg(paths, width, height), width, height, mode: "centerline" };
 }

@@ -107,12 +107,14 @@
       <div class="trace-controls">
         <label class="field trace-threshold">Threshold <output id="trace-threshold-value" for="trace-threshold">128</output><input id="trace-threshold" type="range" min="0" max="255" value="128"></label>
         <label class="field">Tracing mode<select id="trace-mode"><option value="centerline">Centerline (single stroke)</option><option value="outline">Outline (filled regions)</option></select></label>
-        <label class="trace-toggle"><input id="trace-grayscale" type="checkbox" checked> Convert to grayscale</label>
+        <label class="trace-toggle"><input id="trace-grayscale" type="checkbox" checked> Grayscale (off: retain colors)</label>
         <label class="trace-toggle"><input id="trace-invert" type="checkbox"> Invert light and dark</label>
         <label class="trace-toggle"><input id="trace-despeckle" type="checkbox"> Remove small specks</label>
         <label class="field trace-speck-size">Maximum speck size <output id="trace-speck-value" for="trace-speck-size">3 px</output><input id="trace-speck-size" type="range" min="1" max="50" value="3" disabled></label>
+        <label class="field trace-detail">Detail <output id="trace-detail-value" for="trace-detail">6</output><input id="trace-detail" type="range" min="1" max="10" value="6"></label>
+        <label class="field trace-smoothing">Smoothing <output id="trace-smoothing-value" for="trace-smoothing">1 px</output><input id="trace-smoothing" type="range" min="0" max="5" step="0.1" value="1"></label>
       </div>
-      <div class="trace-preview-frame"><canvas id="image-trace-preview" aria-label="Live vector trace preview"></canvas></div>
+      <div class="trace-preview-frame"><div id="image-trace-preview" role="img" aria-label="Live SVG vector trace preview"></div></div>
       <p id="image-trace-status" class="trace-status" role="status" aria-live="polite"></p>
       <p id="image-trace-error" class="trace-error" role="alert" hidden></p>
       <div class="dialog-actions"><button id="image-trace-cancel" class="button" type="button">Cancel</button><button id="image-trace-insert" class="button button-primary" type="button" disabled>Add vector artwork</button></div>

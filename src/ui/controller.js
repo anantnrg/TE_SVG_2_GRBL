@@ -1,7 +1,6 @@
 import paper from "paper";
 import { DocumentModel, paperDimensions } from "../document/model.js";
 import { importSvg } from "../svg/importer.js";
-import { traceImage } from "../image/tracer.js";
 import { parseOpenTypeFont, generateTextSvg, TEXT_FONT_CATEGORIES, TEXT_FONTS } from "../text/generator.js";
 import { estimateCoverage, generateGcode } from "../gcode/exporter.js";
 import { PaperCanvas } from "./paper-canvas.js";
@@ -28,6 +27,9 @@ export class AppController {
     this.warningTimer = null;
     this.pendingImageTrace = null;
     this.pendingImageTraceResolve = null;
+    this.imageTraceWorker = null;
+    this.imageTraceRequestId = 0;
+    this.imageTraceTimer = null;
     this.textFontPromises = new Map();
     this.pendingTextResult = null;
     this.textPreviewRequest = 0;
@@ -82,8 +84,8 @@ export class AppController {
       this.pendingTextResult = null;
     });
 
-    for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size"]) {
-      byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" ? "input" : "change", () => this.updateImageTracePreview());
+    for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size", "trace-detail", "trace-smoothing"]) {
+      byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" || id === "trace-detail" || id === "trace-smoothing" ? "input" : "change", () => this.updateImageTracePreview());
     }
     byId("trace-despeckle").addEventListener("change", () => {
       byId("trace-speck-size").disabled = !byId("trace-despeckle").checked;
@@ -315,6 +317,10 @@ export class AppController {
     byId("trace-despeckle").checked = false;
     byId("trace-speck-size").value = "3";
     byId("trace-speck-size").disabled = true;
+    byId("trace-detail").value = "6";
+    byId("trace-detail-value").textContent = "6";
+    byId("trace-smoothing").value = "1";
+    byId("trace-smoothing-value").textContent = "1 px";
     byId("image-trace-error").hidden = true;
     byId("image-trace-dialog").showModal();
     this.updateImageTracePreview();
@@ -328,7 +334,9 @@ export class AppController {
       grayscale: byId("trace-grayscale").checked,
       invert: byId("trace-invert").checked,
       despeckle: byId("trace-despeckle").checked,
-      maxSpeckArea: Number(byId("trace-speck-size").value)
+      maxSpeckSize: Number(byId("trace-speck-size").value),
+      detail: Number(byId("trace-detail").value),
+      smoothing: Number(byId("trace-smoothing").value)
     };
   }
 
@@ -337,41 +345,75 @@ export class AppController {
     if (!pending) return;
     byId("trace-threshold-value").textContent = byId("trace-threshold").value;
     byId("trace-speck-value").textContent = `${byId("trace-speck-size").value} px`;
-    const canvas = byId("image-trace-preview");
-    const context = canvas.getContext("2d");
+    byId("trace-detail-value").textContent = byId("trace-detail").value;
+    byId("trace-smoothing-value").textContent = `${byId("trace-smoothing").value} px`;
     const status = byId("image-trace-status");
     const error = byId("image-trace-error");
     const addButton = byId("image-trace-insert");
-    try {
-      const trace = traceImage(pending.pixels, pending.width, pending.height, this.imageTraceOptions());
-      pending.trace = trace;
-      canvas.width = pending.width;
-      canvas.height = pending.height;
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.beginPath();
-      for (const path of trace.paths) {
-        context.moveTo(path.points[0].x, path.points[0].y);
-        for (const point of path.points.slice(1)) context.lineTo(point.x, point.y);
-        if (path.closed) context.closePath();
+    const requestId = ++this.imageTraceRequestId;
+    pending.trace = null;
+    pending.requestId = requestId;
+    addButton.disabled = true;
+    error.hidden = true;
+    byId("image-trace-preview").replaceChildren();
+    status.textContent = `Tracing ${pending.file.name} · ${pending.width} × ${pending.height} px…`;
+    if (this.imageTraceTimer) clearTimeout(this.imageTraceTimer);
+    this.imageTraceTimer = setTimeout(() => {
+      try {
+        if (!this.imageTraceWorker) {
+          this.imageTraceWorker = new Worker("./dist/image-trace-worker.js", { type: "module" });
+          this.imageTraceWorker.addEventListener("message", (event) => this.receiveImageTrace(event.data));
+          this.imageTraceWorker.addEventListener("error", (workerError) => {
+            const active = this.pendingImageTrace;
+            if (active) this.failImageTrace(active.requestId, workerError);
+          });
+        }
+        const pixels = pending.pixels.slice();
+        this.imageTraceWorker.postMessage({
+          id: requestId,
+          pixels: pixels.buffer,
+          width: pending.width,
+          height: pending.height,
+          options: this.imageTraceOptions()
+        }, [pixels.buffer]);
+      } catch (workerError) {
+        this.failImageTrace(requestId, workerError);
       }
-      context.fillStyle = "#09090b";
-      if (trace.mode === "outline") context.fill("evenodd");
-      context.strokeStyle = "#09090b";
-      context.lineWidth = trace.mode === "centerline" ? 1.25 : 0.6;
-      context.stroke();
-      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px · ${trace.paths.length} ${trace.paths.length === 1 ? "path" : "paths"}`;
-      error.hidden = true;
-      addButton.disabled = false;
-    } catch (traceError) {
-      pending.trace = null;
-      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px`;
-      error.textContent = traceError.message;
-      error.hidden = false;
-      addButton.disabled = true;
-      canvas.width = 0;
-      canvas.height = 0;
+    }, 120);
+  }
+
+  receiveImageTrace({ id, result, error: message }) {
+    const pending = this.pendingImageTrace;
+    if (!pending || pending.requestId !== id) return;
+    if (message) {
+      this.failImageTrace(id, new Error(message));
+      return;
     }
+    try {
+      const document = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+      if (document.documentElement.localName !== "svg" || document.querySelector("parsererror")) {
+        throw new Error("The tracing engine returned invalid SVG.");
+      }
+      const preview = byId("image-trace-preview");
+      preview.replaceChildren(document.importNode(document.documentElement, true));
+      pending.trace = result;
+      byId("image-trace-status").textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px · ${result.pathCount} ${result.pathCount === 1 ? "path" : "paths"}`;
+      byId("image-trace-error").hidden = true;
+      byId("image-trace-insert").disabled = false;
+    } catch (previewError) {
+      this.failImageTrace(id, previewError);
+    }
+  }
+
+  failImageTrace(requestId, traceError) {
+    const pending = this.pendingImageTrace;
+    if (!pending || pending.requestId !== requestId) return;
+    pending.trace = null;
+    byId("image-trace-status").textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px`;
+    byId("image-trace-error").textContent = traceError.message || "Image tracing failed.";
+    byId("image-trace-error").hidden = false;
+    byId("image-trace-insert").disabled = true;
+    byId("image-trace-preview").replaceChildren();
   }
 
   insertImageTrace() {
@@ -397,6 +439,9 @@ export class AppController {
   }
 
   finishImageTrace(accepted) {
+    if (this.imageTraceTimer) clearTimeout(this.imageTraceTimer);
+    this.imageTraceTimer = null;
+    this.imageTraceRequestId += 1;
     const resolve = this.pendingImageTraceResolve;
     this.pendingImageTraceResolve = null;
     this.pendingImageTrace = null;
