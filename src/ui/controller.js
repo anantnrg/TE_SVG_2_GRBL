@@ -2,6 +2,7 @@ import paper from "paper";
 import { DocumentModel, paperDimensions } from "../document/model.js";
 import { importSvg } from "../svg/importer.js";
 import { traceImage } from "../image/tracer.js";
+import { parseOpenTypeFont, generateTextSvg, TEXT_FONT_CATEGORIES, TEXT_FONTS } from "../text/generator.js";
 import { estimateCoverage, generateGcode } from "../gcode/exporter.js";
 import { PaperCanvas } from "./paper-canvas.js";
 import { NotificationHistory } from "./notification-history.js";
@@ -27,8 +28,12 @@ export class AppController {
     this.warningTimer = null;
     this.pendingImageTrace = null;
     this.pendingImageTraceResolve = null;
+    this.textFontPromises = new Map();
+    this.pendingTextResult = null;
+    this.textPreviewRequest = 0;
     this.canvas.aspectLocked = () => this.aspectLocked;
     this.bindEvents();
+    this.populateTextFonts();
     this.update();
     this.fitSheet();
   }
@@ -57,6 +62,25 @@ export class AppController {
       dropZone.classList.remove("drag-over");
     });
     dropZone.addEventListener("drop", async (event) => this.importFiles([...event.dataTransfer.files]));
+
+    byId("text-tool-button").addEventListener("click", () => {
+      byId("text-dialog").showModal();
+      this.updateTextPreview();
+      byId("text-input").focus();
+    });
+    byId("text-category").addEventListener("change", () => {
+      this.populateTextFonts();
+      this.updateTextPreview();
+    });
+    for (const id of ["text-input", "text-font", "text-size", "text-letter-spacing", "text-line-spacing", "text-alignment"]) {
+      byId(id).addEventListener(id === "text-input" ? "input" : "change", () => this.updateTextPreview());
+    }
+    byId("text-cancel").addEventListener("click", () => byId("text-dialog").close());
+    byId("text-close").addEventListener("click", () => byId("text-dialog").close());
+    byId("text-insert").addEventListener("click", () => this.insertTextObject());
+    byId("text-dialog").addEventListener("close", () => {
+      this.pendingTextResult = null;
+    });
 
     for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size"]) {
       byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" ? "input" : "change", () => this.updateImageTracePreview());
@@ -162,6 +186,104 @@ export class AppController {
     }
     this.update();
     if (errors.length) this.showWarning(errors.join(" "), true);
+  }
+
+  populateTextFonts() {
+    const categoryId = byId("text-category").value || TEXT_FONT_CATEGORIES[0].id;
+    const category = TEXT_FONT_CATEGORIES.find((item) => item.id === categoryId) ?? TEXT_FONT_CATEGORIES[0];
+    if (byId("text-category").options.length === 0) {
+      byId("text-category").replaceChildren(...TEXT_FONT_CATEGORIES.map((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.label;
+        return option;
+      }));
+      byId("text-category").value = category.id;
+    }
+    byId("text-font").replaceChildren(...category.fonts.map((font) => {
+      const option = document.createElement("option");
+      option.value = font.id;
+      option.textContent = font.label;
+      return option;
+    }));
+    byId("text-font-description").textContent = category.description;
+  }
+
+  async loadTextFont(fontId) {
+    const fontInfo = TEXT_FONTS.find((item) => item.id === fontId);
+    if (!fontInfo) throw new Error("Select an available font.");
+    if (fontInfo.kind === "hershey") return null;
+    if (!this.textFontPromises.has(fontId)) {
+      const load = fetch(fontInfo.source).then(async (response) => {
+        if (!response.ok) throw new Error(`${fontInfo.label} font could not be loaded (${response.status}).`);
+        return parseOpenTypeFont(await response.arrayBuffer());
+      });
+      this.textFontPromises.set(fontId, load);
+      load.catch(() => this.textFontPromises.delete(fontId));
+    }
+    return this.textFontPromises.get(fontId);
+  }
+
+  textOptions() {
+    return {
+      fontSize: Number(byId("text-size").value),
+      letterSpacing: Number(byId("text-letter-spacing").value),
+      lineSpacing: Number(byId("text-line-spacing").value),
+      alignment: byId("text-alignment").value
+    };
+  }
+
+  async updateTextPreview() {
+    const request = ++this.textPreviewRequest;
+    const text = byId("text-input").value;
+    const fontId = byId("text-font").value;
+    const preview = byId("text-preview");
+    const status = byId("text-preview-status");
+    const error = byId("text-preview-error");
+    const insert = byId("text-insert");
+    this.pendingTextResult = null;
+    insert.disabled = true;
+    error.hidden = true;
+    preview.replaceChildren();
+    status.textContent = "Preparing vector preview…";
+    try {
+      const font = await this.loadTextFont(fontId);
+      if (request !== this.textPreviewRequest) return;
+      const result = generateTextSvg(fontId, font, text, this.textOptions());
+      this.pendingTextResult = result;
+      preview.innerHTML = result.svg;
+      const selected = TEXT_FONTS.find((item) => item.id === fontId);
+      status.textContent = `${selected.label} · ${result.pathCount} ${result.pathCount === 1 ? "path" : "paths"} · ${result.width.toFixed(1)} × ${result.height.toFixed(1)} mm`;
+      insert.disabled = false;
+    } catch (previewError) {
+      if (request !== this.textPreviewRequest) return;
+      status.textContent = "";
+      error.textContent = previewError.message;
+      error.hidden = false;
+    }
+  }
+
+  insertTextObject() {
+    if (!this.pendingTextResult) return;
+    try {
+      const value = byId("text-input").value.trim().replace(/\s+/g, " ");
+      const label = value.length > 28 ? `${value.slice(0, 27)}…` : value;
+      const object = importSvg(this.pendingTextResult.svg, `Text: ${label}`, this.paperScope.project);
+      const availableWidth = Math.max(0.1, this.model.width - Math.min(20, this.model.width * 0.1));
+      const availableHeight = Math.max(0.1, this.model.height - Math.min(20, this.model.height * 0.1));
+      const scale = Math.min(1, availableWidth / object.width, availableHeight / object.height);
+      object.width *= scale;
+      object.height *= scale;
+      object.x = Math.min(10, Math.max(0, this.model.width - object.width));
+      object.y = Math.min(10, Math.max(0, this.model.height - object.height));
+      this.model.add(object);
+      this.update();
+      this.showWarning(`Inserted ${object.paths.length} vector paths of text.`);
+      byId("text-dialog").close();
+    } catch (error) {
+      byId("text-preview-error").textContent = `Could not insert text: ${error.message}`;
+      byId("text-preview-error").hidden = false;
+    }
   }
 
   async openImageTrace(file) {

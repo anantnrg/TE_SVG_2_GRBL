@@ -37,6 +37,7 @@ npm test
 - `src/ui/` — DOM controls and canvas view
 - `src/document/` — sheet model and object transforms
 - `src/image/` — offline raster thresholding, cleanup, and vector tracing
+- `src/text/` — offline font rendering and Hershey stroke-font data
 - `src/svg/` — SVG import and unsupported-content reporting
 - `src/gcode/` — plotter coordinate mapping and G-code output
 - `tests/` — offline unit tests
@@ -45,4 +46,6 @@ SVG artwork retains supported vector paths and reports unsupported elements or e
 
 Export is refused if any flattened path leaves the paper or configured machine area.
 
-Run `npm test` for document and exporter checks. The browser build bundles Paper.js locally, so the editor itself does not fetch any remote assets or make network requests.
+Use **Text** to create multiline plotter text. The bundled outline and handwriting fonts are Anton, Bungee, Russo One, Kalam, and Patrick Hand (SIL Open Font License 1.1; license notices are in `assets/licenses/fonts/`). The stroke category uses public-domain Hershey Simplex, Gothic English, and Script Simplex data, with attribution/license notices in `assets/licenses/hershey-fonts.txt`; these are actual separate centreline strokes, not regular-font outlines. Font outlines are rendered locally with opentype.js (MIT, notice in `assets/licenses/opentype.js-MIT.txt`), and inserted text is converted through the normal SVG importer into editable geometry. The text tool currently supports printable ASCII plus spaces, tabs, and newlines; unsupported glyphs are reported instead of silently dropped.
+
+Run `npm test` for document, exporter, image-tracing, and text-rendering checks. The browser build bundles Paper.js and opentype.js locally; fonts and Hershey data are served from this repository, so the editor itself does not fetch remote assets or make network requests.
