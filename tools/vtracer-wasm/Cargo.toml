@@ -1,0 +1,15 @@
+[package]
+name = "te-svg-vtracer-wasm"
+version = "1.0.0"
+edition = "2024"
+publish = false
+description = "Browser WASM wrapper for VTracer raster vectorization"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vtracer = "=1.0.0-alpha.4"
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"

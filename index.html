@@ -18,6 +18,7 @@
         <button class="button notification-toggle" id="notification-toggle" type="button" aria-expanded="false" aria-controls="notification-tray">
           Notifications <span id="notification-count" class="notification-count" hidden>0</span>
         </button>
+        <button class="button" id="text-tool-button" type="button">Text</button>
         <button class="button button-primary" id="export-button" type="button" disabled><span aria-hidden="true">↓</span> Export G-code</button>
       </div>
     </header>
@@ -77,18 +78,43 @@
       <ol id="notification-list" class="notification-list"></ol>
       <p id="empty-notifications" class="empty-note">No notifications yet.</p>
     </aside>
+    <dialog id="text-dialog" class="text-dialog" aria-labelledby="text-title" aria-describedby="text-help">
+      <header class="text-dialog-heading">
+        <div><span class="eyebrow">VECTOR TEXT</span><h2 id="text-title">Create plotter text</h2></div>
+        <button id="text-close" class="icon-button" type="button" aria-label="Close text tool">×</button>
+      </header>
+      <p id="text-help">Text becomes editable vector paths and works with the existing G-code export.</p>
+      <label class="field text-entry">Text<textarea id="text-input" rows="3" placeholder="Type your text here" spellcheck="false"></textarea></label>
+      <div class="text-font-row">
+        <label class="field">Font category<select id="text-category"></select></label>
+        <label class="field">Font<select id="text-font"></select></label>
+      </div>
+      <p id="text-font-description" class="text-font-description"></p>
+      <div class="text-settings">
+        <label class="field">Size <span class="input-unit"><input id="text-size" type="number" min="0.5" max="500" step="0.5" value="12"><small>mm</small></span></label>
+        <label class="field">Letter spacing <span class="input-unit"><input id="text-letter-spacing" type="number" min="-500" max="500" step="0.1" value="0"><small>mm</small></span></label>
+        <label class="field">Line spacing <span class="input-unit"><input id="text-line-spacing" type="number" min="0.5" max="4" step="0.1" value="1.2"><small>×</small></span></label>
+        <label class="field">Alignment<select id="text-alignment"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+      </div>
+      <div class="text-preview-frame"><div id="text-preview" role="img" aria-label="Preview of the generated vector text"></div></div>
+      <p id="text-preview-status" class="text-preview-status" role="status" aria-live="polite"></p>
+      <p id="text-preview-error" class="text-preview-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button id="text-cancel" class="button" type="button">Cancel</button><button id="text-insert" class="button button-primary" type="button" disabled>Insert Text</button></div>
+    </dialog>
     <dialog id="image-trace-dialog" class="image-trace-dialog" aria-labelledby="image-trace-title" aria-describedby="image-trace-help">
       <header class="image-trace-heading"><div><span class="eyebrow">IMAGE TO VECTOR</span><h2 id="image-trace-title">Trace image</h2></div><button id="image-trace-close" class="icon-button" type="button" aria-label="Cancel image trace">×</button></header>
       <p id="image-trace-help">Adjust the threshold and tracing mode, then review the vector preview before adding it to your sheet.</p>
       <div class="trace-controls">
         <label class="field trace-threshold">Threshold <output id="trace-threshold-value" for="trace-threshold">128</output><input id="trace-threshold" type="range" min="0" max="255" value="128"></label>
         <label class="field">Tracing mode<select id="trace-mode"><option value="centerline">Centerline (single stroke)</option><option value="outline">Outline (filled regions)</option></select></label>
-        <label class="trace-toggle"><input id="trace-grayscale" type="checkbox" checked> Convert to grayscale</label>
+        <label class="trace-toggle"><input id="trace-grayscale" type="checkbox" checked> Grayscale (off: retain colors)</label>
         <label class="trace-toggle"><input id="trace-invert" type="checkbox"> Invert light and dark</label>
         <label class="trace-toggle"><input id="trace-despeckle" type="checkbox"> Remove small specks</label>
         <label class="field trace-speck-size">Maximum speck size <output id="trace-speck-value" for="trace-speck-size">3 px</output><input id="trace-speck-size" type="range" min="1" max="50" value="3" disabled></label>
+        <label class="field trace-detail">Detail <output id="trace-detail-value" for="trace-detail">6</output><input id="trace-detail" type="range" min="1" max="10" value="6"></label>
+        <label class="field trace-smoothing">Smoothing <output id="trace-smoothing-value" for="trace-smoothing">1 px</output><input id="trace-smoothing" type="range" min="0" max="5" step="0.1" value="1"></label>
       </div>
-      <div class="trace-preview-frame"><canvas id="image-trace-preview" aria-label="Live vector trace preview"></canvas></div>
+      <div class="trace-preview-frame"><div id="image-trace-preview" role="img" aria-label="Live SVG vector trace preview"></div></div>
       <p id="image-trace-status" class="trace-status" role="status" aria-live="polite"></p>
       <p id="image-trace-error" class="trace-error" role="alert" hidden></p>
       <div class="dialog-actions"><button id="image-trace-cancel" class="button" type="button">Cancel</button><button id="image-trace-insert" class="button button-primary" type="button" disabled>Add vector artwork</button></div>

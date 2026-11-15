@@ -1,7 +1,7 @@
 import paper from "paper";
 import { DocumentModel, paperDimensions } from "../document/model.js";
 import { importSvg } from "../svg/importer.js";
-import { traceImage } from "../image/tracer.js";
+import { parseOpenTypeFont, generateTextSvg, TEXT_FONT_CATEGORIES, TEXT_FONTS } from "../text/generator.js";
 import { estimateCoverage, generateGcode } from "../gcode/exporter.js";
 import { PaperCanvas } from "./paper-canvas.js";
 import { NotificationHistory } from "./notification-history.js";
@@ -27,8 +27,15 @@ export class AppController {
     this.warningTimer = null;
     this.pendingImageTrace = null;
     this.pendingImageTraceResolve = null;
+    this.imageTraceWorker = null;
+    this.imageTraceRequestId = 0;
+    this.imageTraceTimer = null;
+    this.textFontPromises = new Map();
+    this.pendingTextResult = null;
+    this.textPreviewRequest = 0;
     this.canvas.aspectLocked = () => this.aspectLocked;
     this.bindEvents();
+    this.populateTextFonts();
     this.update();
     this.fitSheet();
   }
@@ -58,8 +65,27 @@ export class AppController {
     });
     dropZone.addEventListener("drop", async (event) => this.importFiles([...event.dataTransfer.files]));
 
-    for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size"]) {
-      byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" ? "input" : "change", () => this.updateImageTracePreview());
+    byId("text-tool-button").addEventListener("click", () => {
+      byId("text-dialog").showModal();
+      this.updateTextPreview();
+      byId("text-input").focus();
+    });
+    byId("text-category").addEventListener("change", () => {
+      this.populateTextFonts();
+      this.updateTextPreview();
+    });
+    for (const id of ["text-input", "text-font", "text-size", "text-letter-spacing", "text-line-spacing", "text-alignment"]) {
+      byId(id).addEventListener(id === "text-input" ? "input" : "change", () => this.updateTextPreview());
+    }
+    byId("text-cancel").addEventListener("click", () => byId("text-dialog").close());
+    byId("text-close").addEventListener("click", () => byId("text-dialog").close());
+    byId("text-insert").addEventListener("click", () => this.insertTextObject());
+    byId("text-dialog").addEventListener("close", () => {
+      this.pendingTextResult = null;
+    });
+
+    for (const id of ["trace-threshold", "trace-mode", "trace-grayscale", "trace-invert", "trace-despeckle", "trace-speck-size", "trace-detail", "trace-smoothing"]) {
+      byId(id).addEventListener(id === "trace-threshold" || id === "trace-speck-size" || id === "trace-detail" || id === "trace-smoothing" ? "input" : "change", () => this.updateImageTracePreview());
     }
     byId("trace-despeckle").addEventListener("change", () => {
       byId("trace-speck-size").disabled = !byId("trace-despeckle").checked;
@@ -164,6 +190,104 @@ export class AppController {
     if (errors.length) this.showWarning(errors.join(" "), true);
   }
 
+  populateTextFonts() {
+    const categoryId = byId("text-category").value || TEXT_FONT_CATEGORIES[0].id;
+    const category = TEXT_FONT_CATEGORIES.find((item) => item.id === categoryId) ?? TEXT_FONT_CATEGORIES[0];
+    if (byId("text-category").options.length === 0) {
+      byId("text-category").replaceChildren(...TEXT_FONT_CATEGORIES.map((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.label;
+        return option;
+      }));
+      byId("text-category").value = category.id;
+    }
+    byId("text-font").replaceChildren(...category.fonts.map((font) => {
+      const option = document.createElement("option");
+      option.value = font.id;
+      option.textContent = font.label;
+      return option;
+    }));
+    byId("text-font-description").textContent = category.description;
+  }
+
+  async loadTextFont(fontId) {
+    const fontInfo = TEXT_FONTS.find((item) => item.id === fontId);
+    if (!fontInfo) throw new Error("Select an available font.");
+    if (fontInfo.kind === "hershey") return null;
+    if (!this.textFontPromises.has(fontId)) {
+      const load = fetch(fontInfo.source).then(async (response) => {
+        if (!response.ok) throw new Error(`${fontInfo.label} font could not be loaded (${response.status}).`);
+        return parseOpenTypeFont(await response.arrayBuffer());
+      });
+      this.textFontPromises.set(fontId, load);
+      load.catch(() => this.textFontPromises.delete(fontId));
+    }
+    return this.textFontPromises.get(fontId);
+  }
+
+  textOptions() {
+    return {
+      fontSize: Number(byId("text-size").value),
+      letterSpacing: Number(byId("text-letter-spacing").value),
+      lineSpacing: Number(byId("text-line-spacing").value),
+      alignment: byId("text-alignment").value
+    };
+  }
+
+  async updateTextPreview() {
+    const request = ++this.textPreviewRequest;
+    const text = byId("text-input").value;
+    const fontId = byId("text-font").value;
+    const preview = byId("text-preview");
+    const status = byId("text-preview-status");
+    const error = byId("text-preview-error");
+    const insert = byId("text-insert");
+    this.pendingTextResult = null;
+    insert.disabled = true;
+    error.hidden = true;
+    preview.replaceChildren();
+    status.textContent = "Preparing vector preview…";
+    try {
+      const font = await this.loadTextFont(fontId);
+      if (request !== this.textPreviewRequest) return;
+      const result = generateTextSvg(fontId, font, text, this.textOptions());
+      this.pendingTextResult = result;
+      preview.innerHTML = result.svg;
+      const selected = TEXT_FONTS.find((item) => item.id === fontId);
+      status.textContent = `${selected.label} · ${result.pathCount} ${result.pathCount === 1 ? "path" : "paths"} · ${result.width.toFixed(1)} × ${result.height.toFixed(1)} mm`;
+      insert.disabled = false;
+    } catch (previewError) {
+      if (request !== this.textPreviewRequest) return;
+      status.textContent = "";
+      error.textContent = previewError.message;
+      error.hidden = false;
+    }
+  }
+
+  insertTextObject() {
+    if (!this.pendingTextResult) return;
+    try {
+      const value = byId("text-input").value.trim().replace(/\s+/g, " ");
+      const label = value.length > 28 ? `${value.slice(0, 27)}…` : value;
+      const object = importSvg(this.pendingTextResult.svg, `Text: ${label}`, this.paperScope.project);
+      const availableWidth = Math.max(0.1, this.model.width - Math.min(20, this.model.width * 0.1));
+      const availableHeight = Math.max(0.1, this.model.height - Math.min(20, this.model.height * 0.1));
+      const scale = Math.min(1, availableWidth / object.width, availableHeight / object.height);
+      object.width *= scale;
+      object.height *= scale;
+      object.x = Math.min(10, Math.max(0, this.model.width - object.width));
+      object.y = Math.min(10, Math.max(0, this.model.height - object.height));
+      this.model.add(object);
+      this.update();
+      this.showWarning(`Inserted ${object.paths.length} vector paths of text.`);
+      byId("text-dialog").close();
+    } catch (error) {
+      byId("text-preview-error").textContent = `Could not insert text: ${error.message}`;
+      byId("text-preview-error").hidden = false;
+    }
+  }
+
   async openImageTrace(file) {
     if (typeof createImageBitmap !== "function") {
       throw new Error("This browser cannot decode local images for tracing.");
@@ -193,6 +317,10 @@ export class AppController {
     byId("trace-despeckle").checked = false;
     byId("trace-speck-size").value = "3";
     byId("trace-speck-size").disabled = true;
+    byId("trace-detail").value = "6";
+    byId("trace-detail-value").textContent = "6";
+    byId("trace-smoothing").value = "1";
+    byId("trace-smoothing-value").textContent = "1 px";
     byId("image-trace-error").hidden = true;
     byId("image-trace-dialog").showModal();
     this.updateImageTracePreview();
@@ -206,7 +334,9 @@ export class AppController {
       grayscale: byId("trace-grayscale").checked,
       invert: byId("trace-invert").checked,
       despeckle: byId("trace-despeckle").checked,
-      maxSpeckArea: Number(byId("trace-speck-size").value)
+      maxSpeckSize: Number(byId("trace-speck-size").value),
+      detail: Number(byId("trace-detail").value),
+      smoothing: Number(byId("trace-smoothing").value)
     };
   }
 
@@ -215,41 +345,75 @@ export class AppController {
     if (!pending) return;
     byId("trace-threshold-value").textContent = byId("trace-threshold").value;
     byId("trace-speck-value").textContent = `${byId("trace-speck-size").value} px`;
-    const canvas = byId("image-trace-preview");
-    const context = canvas.getContext("2d");
+    byId("trace-detail-value").textContent = byId("trace-detail").value;
+    byId("trace-smoothing-value").textContent = `${byId("trace-smoothing").value} px`;
     const status = byId("image-trace-status");
     const error = byId("image-trace-error");
     const addButton = byId("image-trace-insert");
-    try {
-      const trace = traceImage(pending.pixels, pending.width, pending.height, this.imageTraceOptions());
-      pending.trace = trace;
-      canvas.width = pending.width;
-      canvas.height = pending.height;
-      context.fillStyle = "#fff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.beginPath();
-      for (const path of trace.paths) {
-        context.moveTo(path.points[0].x, path.points[0].y);
-        for (const point of path.points.slice(1)) context.lineTo(point.x, point.y);
-        if (path.closed) context.closePath();
+    const requestId = ++this.imageTraceRequestId;
+    pending.trace = null;
+    pending.requestId = requestId;
+    addButton.disabled = true;
+    error.hidden = true;
+    byId("image-trace-preview").replaceChildren();
+    status.textContent = `Tracing ${pending.file.name} · ${pending.width} × ${pending.height} px…`;
+    if (this.imageTraceTimer) clearTimeout(this.imageTraceTimer);
+    this.imageTraceTimer = setTimeout(() => {
+      try {
+        if (!this.imageTraceWorker) {
+          this.imageTraceWorker = new Worker("./dist/image-trace-worker.js", { type: "module" });
+          this.imageTraceWorker.addEventListener("message", (event) => this.receiveImageTrace(event.data));
+          this.imageTraceWorker.addEventListener("error", (workerError) => {
+            const active = this.pendingImageTrace;
+            if (active) this.failImageTrace(active.requestId, workerError);
+          });
+        }
+        const pixels = pending.pixels.slice();
+        this.imageTraceWorker.postMessage({
+          id: requestId,
+          pixels: pixels.buffer,
+          width: pending.width,
+          height: pending.height,
+          options: this.imageTraceOptions()
+        }, [pixels.buffer]);
+      } catch (workerError) {
+        this.failImageTrace(requestId, workerError);
       }
-      context.fillStyle = "#09090b";
-      if (trace.mode === "outline") context.fill("evenodd");
-      context.strokeStyle = "#09090b";
-      context.lineWidth = trace.mode === "centerline" ? 1.25 : 0.6;
-      context.stroke();
-      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px · ${trace.paths.length} ${trace.paths.length === 1 ? "path" : "paths"}`;
-      error.hidden = true;
-      addButton.disabled = false;
-    } catch (traceError) {
-      pending.trace = null;
-      status.textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px`;
-      error.textContent = traceError.message;
-      error.hidden = false;
-      addButton.disabled = true;
-      canvas.width = 0;
-      canvas.height = 0;
+    }, 120);
+  }
+
+  receiveImageTrace({ id, result, error: message }) {
+    const pending = this.pendingImageTrace;
+    if (!pending || pending.requestId !== id) return;
+    if (message) {
+      this.failImageTrace(id, new Error(message));
+      return;
     }
+    try {
+      const document = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+      if (document.documentElement.localName !== "svg" || document.querySelector("parsererror")) {
+        throw new Error("The tracing engine returned invalid SVG.");
+      }
+      const preview = byId("image-trace-preview");
+      preview.replaceChildren(document.importNode(document.documentElement, true));
+      pending.trace = result;
+      byId("image-trace-status").textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px · ${result.pathCount} ${result.pathCount === 1 ? "path" : "paths"}`;
+      byId("image-trace-error").hidden = true;
+      byId("image-trace-insert").disabled = false;
+    } catch (previewError) {
+      this.failImageTrace(id, previewError);
+    }
+  }
+
+  failImageTrace(requestId, traceError) {
+    const pending = this.pendingImageTrace;
+    if (!pending || pending.requestId !== requestId) return;
+    pending.trace = null;
+    byId("image-trace-status").textContent = `${pending.file.name} · ${pending.width} × ${pending.height} px`;
+    byId("image-trace-error").textContent = traceError.message || "Image tracing failed.";
+    byId("image-trace-error").hidden = false;
+    byId("image-trace-insert").disabled = true;
+    byId("image-trace-preview").replaceChildren();
   }
 
   insertImageTrace() {
@@ -275,6 +439,9 @@ export class AppController {
   }
 
   finishImageTrace(accepted) {
+    if (this.imageTraceTimer) clearTimeout(this.imageTraceTimer);
+    this.imageTraceTimer = null;
+    this.imageTraceRequestId += 1;
     const resolve = this.pendingImageTraceResolve;
     this.pendingImageTraceResolve = null;
     this.pendingImageTrace = null;
