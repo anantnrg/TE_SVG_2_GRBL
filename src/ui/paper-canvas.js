@@ -1,4 +1,7 @@
 import { flattenCubicPaths } from "../svg/importer.js";
+import { plotterArea } from "../document/model.js";
+
+const CENTER_SNAP_DISTANCE = 8;
 
 function objectPoint(object, point) {
   const x = point.x * object.width / object.geometryWidth;
@@ -35,6 +38,9 @@ export class PaperCanvas {
     this.model = model;
     this.scope = scope;
     this.onChange = onChange;
+    this.plotterWidth = model.width;
+    this.plotterHeight = model.height;
+    this.snapGuides = null;
     this.aspectLocked = () => true;
     this.zoom = 1;
     this.panX = 0;
@@ -47,7 +53,11 @@ export class PaperCanvas {
     canvas.addEventListener("pointerdown", (event) => this.pointerDown(event));
     canvas.addEventListener("pointermove", (event) => this.pointerMove(event));
     canvas.addEventListener("pointerup", (event) => this.pointerUp(event));
-    canvas.addEventListener("pointercancel", () => { this.drag = null; });
+    canvas.addEventListener("pointercancel", () => {
+      this.drag = null;
+      this.snapGuides = null;
+      this.draw();
+    });
     canvas.addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     this.resize();
   }
@@ -67,6 +77,11 @@ export class PaperCanvas {
     this.panX = 0;
     this.panY = 0;
     this.draw();
+  }
+
+  setPlotterSize(width, height) {
+    this.plotterWidth = width;
+    this.plotterHeight = height;
   }
 
   setZoom(value, anchor = null) {
@@ -117,6 +132,38 @@ export class PaperCanvas {
     sheet.strokeColor = "#d9dcd7";
     sheet.strokeWidth = 0.22 / matrix.scale;
     sheet.data.role = "sheet";
+    if (Number.isFinite(this.plotterWidth) && this.plotterWidth > 0 &&
+        Number.isFinite(this.plotterHeight) && this.plotterHeight > 0) {
+      const area = plotterArea(this.model.width, this.model.height, this.plotterWidth, this.plotterHeight);
+      if (area.width < this.model.width || area.height < this.model.height) {
+        const workArea = new this.scope.Path.Rectangle(new this.scope.Rectangle(area.x, area.y, area.width, area.height));
+        workArea.strokeColor = "#748b78";
+        workArea.strokeWidth = 0.65 / matrix.scale;
+        workArea.dashArray = [2 / matrix.scale, 2 / matrix.scale];
+        workArea.fillColor = null;
+        workArea.data.role = "plotter-bounds";
+      }
+    }
+    if (this.snapGuides?.x) {
+      const guide = new this.scope.Path.Line(
+        new this.scope.Point(this.model.width / 2, 0),
+        new this.scope.Point(this.model.width / 2, this.model.height)
+      );
+      guide.strokeColor = "#3487a0";
+      guide.strokeWidth = 0.45 / matrix.scale;
+      guide.dashArray = [3 / matrix.scale, 2 / matrix.scale];
+      guide.data.role = "snap-guide";
+    }
+    if (this.snapGuides?.y) {
+      const guide = new this.scope.Path.Line(
+        new this.scope.Point(0, this.model.height / 2),
+        new this.scope.Point(this.model.width, this.model.height / 2)
+      );
+      guide.strokeColor = "#3487a0";
+      guide.strokeWidth = 0.45 / matrix.scale;
+      guide.dashArray = [3 / matrix.scale, 2 / matrix.scale];
+      guide.data.role = "snap-guide";
+    }
     for (const object of this.model.objects) {
       for (const path of object.paths) {
         const geometry = flattenCubicPaths([path], 0.2)[0];
@@ -158,12 +205,13 @@ export class PaperCanvas {
     outline.strokeWidth = 0.55 / scale;
     outline.dashArray = [2 / scale, 2 / scale];
     outline.data.handle = "outline";
-    const resizePoint = corners[2];
-    const handle = new this.scope.Path.Circle(new this.scope.Point(resizePoint.x, resizePoint.y), 4.5 / scale);
-    handle.fillColor = "#fff";
-    handle.strokeColor = "#d26a42";
-    handle.strokeWidth = 1 / scale;
-    handle.data.handle = "resize";
+    for (const corner of corners) {
+      const handle = new this.scope.Path.Circle(new this.scope.Point(corner.x, corner.y), 4.5 / scale);
+      handle.fillColor = "#fff";
+      handle.strokeColor = "#d26a42";
+      handle.strokeWidth = 1 / scale;
+      handle.data.handle = "resize";
+    }
     const topMid = { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 };
     const rotationPoint = { x: topMid.x, y: topMid.y - 12 / scale };
     const connector = new this.scope.Path.Line(new this.scope.Point(topMid.x, topMid.y), new this.scope.Point(rotationPoint.x, rotationPoint.y));
@@ -181,7 +229,9 @@ export class PaperCanvas {
       const corners = this.objectCorners(selected);
       const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
       if (distance(point, { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 - 12 / this.scale }) < tolerance) return { object: selected, handle: "rotate" };
-      if (distance(point, corners[2]) < tolerance) return { object: selected, handle: "resize" };
+      for (let corner = 0; corner < corners.length; corner += 1) {
+        if (distance(point, corners[corner]) < tolerance) return { object: selected, handle: "resize", corner };
+      }
     }
     for (const object of [...this.model.objects].reverse()) {
       const paths = flattenCubicPaths(object.paths, Math.max(0.05, 0.5 / this.scale));
@@ -201,16 +251,19 @@ export class PaperCanvas {
     const screen = this.screenPoint(event);
     const point = this.screenToPaper(screen.x, screen.y);
     const hit = this.hitTest(point);
+    this.snapGuides = null;
     if (hit) {
       this.model.select(hit.object.id);
       const object = hit.object;
       this.drag = {
         mode: hit.handle ?? "move",
+        resizeCorner: hit.corner,
         start: point,
         x: object.x, y: object.y, width: object.width, height: object.height,
         rotation: object.rotation,
         aspect: object.width / object.height,
         center: { x: object.x + object.width / 2, y: object.y + object.height / 2 },
+        resizeAnchor: hit.handle === "resize" ? this.objectCorners(object)[(hit.corner + 2) % 4] : null,
         startAngle: Math.atan2(point.y - (object.y + object.height / 2), point.x - (object.x + object.width / 2))
       };
     } else {
@@ -234,19 +287,39 @@ export class PaperCanvas {
       if (this.drag.mode === "move") {
         object.x = this.drag.x + point.x - this.drag.start.x;
         object.y = this.drag.y + point.y - this.drag.start.y;
+        const tolerance = CENTER_SNAP_DISTANCE / this.scale;
+        const centerX = this.model.width / 2, centerY = this.model.height / 2;
+        const snapX = Math.abs(object.x + object.width / 2 - centerX) <= tolerance;
+        const snapY = Math.abs(object.y + object.height / 2 - centerY) <= tolerance;
+        if (snapX) object.x = centerX - object.width / 2;
+        if (snapY) object.y = centerY - object.height / 2;
+        this.snapGuides = snapX || snapY ? { x: snapX, y: snapY } : null;
       } else if (this.drag.mode === "rotate") {
         const angle = Math.atan2(point.y - this.drag.center.y, point.x - this.drag.center.x);
         object.rotation = this.drag.rotation + (angle - this.drag.startAngle) * 180 / Math.PI;
       } else if (this.drag.mode === "resize") {
-        const angle = -this.drag.rotation * Math.PI / 180;
-        const dx = point.x - this.drag.center.x, dy = point.y - this.drag.center.y;
-        let width = Math.max(1, 2 * (dx * Math.cos(angle) + dy * Math.sin(angle)));
-        let height = Math.max(1, 2 * (-dx * Math.sin(angle) + dy * Math.cos(angle)));
-        if (this.onAspectLocked()) height = width / this.drag.aspect;
+        const corner = this.drag.resizeCorner;
+        const signX = corner === 0 || corner === 3 ? -1 : 1;
+        const signY = corner === 0 || corner === 1 ? -1 : 1;
+        const angle = this.drag.rotation * Math.PI / 180;
+        const dx = point.x - this.drag.resizeAnchor.x, dy = point.y - this.drag.resizeAnchor.y;
+        const localX = dx * Math.cos(angle) + dy * Math.sin(angle);
+        const localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        let width = Math.max(1, Math.abs(localX));
+        let height = Math.max(1, Math.abs(localY));
+        if (this.onAspectLocked()) {
+          width = Math.max(1, (signX * localX + signY * localY / this.drag.aspect) /
+            (1 + 1 / this.drag.aspect ** 2));
+          height = width / this.drag.aspect;
+        }
+        const centerX = this.drag.resizeAnchor.x + (signX * width / 2) * Math.cos(angle) -
+          (signY * height / 2) * Math.sin(angle);
+        const centerY = this.drag.resizeAnchor.y + (signX * width / 2) * Math.sin(angle) +
+          (signY * height / 2) * Math.cos(angle);
         object.width = width;
         object.height = height;
-        object.x = this.drag.center.x - width / 2;
-        object.y = this.drag.center.y - height / 2;
+        object.x = centerX - width / 2;
+        object.y = centerY - height / 2;
       }
       this.onChange();
     }
@@ -260,6 +333,7 @@ export class PaperCanvas {
   pointerUp() {
     if (!this.drag) return;
     this.drag = null;
+    this.snapGuides = null;
     this.onChange();
   }
 

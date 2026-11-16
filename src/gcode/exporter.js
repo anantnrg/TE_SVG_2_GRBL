@@ -1,4 +1,5 @@
 import { flattenCubicPaths } from "../svg/importer.js";
+import { plotterArea } from "../document/model.js";
 
 function assertPositive(value, label) {
   if (!Number.isFinite(value) || value <= 0) throw new RangeError(`${label} must be a positive finite number.`);
@@ -27,10 +28,11 @@ function transformedPath(object, path) {
   };
 }
 
-function physicalPoint(point, config) {
+function physicalPoint(point, config, area) {
   const originY = config.origin === "bottom-left" ? config.machineHeight : 0;
-  const machineY = originY + (config.yDirection === "up" ? -point.y : point.y);
-  return { x: point.x, y: machineY };
+  const localY = point.y - area.y;
+  const machineY = originY + (config.yDirection === "up" ? -localY : localY);
+  return { x: point.x - area.x, y: machineY };
 }
 
 function nearestOrdered(paths) {
@@ -81,8 +83,7 @@ export function generateGcode(objects, config) {
   if (!["bottom-left", "top-left"].includes(config.origin)) throw new RangeError("Origin must be top-left or bottom-left.");
   if (!["up", "down"].includes(config.yDirection)) throw new RangeError("Y direction must be up or down.");
 
-  const workWidth = Math.min(config.paperWidth, config.machineWidth);
-  const workHeight = Math.min(config.paperHeight, config.machineHeight);
+  const area = plotterArea(config.paperWidth, config.paperHeight, config.machineWidth, config.machineHeight);
   const flattened = [];
   for (const object of objects) {
     assertPositive(object.width, `Width of ${object.name}`);
@@ -99,10 +100,11 @@ export function generateGcode(objects, config) {
       for (const point of path.points) {
         const epsilon = 1e-7;
         if (!Number.isFinite(point.x) || !Number.isFinite(point.y) ||
-            point.x < -epsilon || point.y < -epsilon || point.x > workWidth + epsilon || point.y > workHeight + epsilon) {
+            point.x < area.x - epsilon || point.y < area.y - epsilon ||
+            point.x > area.x + area.width + epsilon || point.y > area.y + area.height + epsilon) {
           throw new RangeError(`“${object.name}” extends beyond the paper or plotter bounds; move or resize it before export.`);
         }
-        const outputPoint = physicalPoint(point, config);
+        const outputPoint = physicalPoint(point, config, area);
         if (outputPoint.y < -epsilon || outputPoint.y > config.machineHeight + epsilon) {
           throw new RangeError(`The selected origin and Y direction place “${object.name}” outside plotter bounds.`);
         }
@@ -126,12 +128,12 @@ export function generateGcode(objects, config) {
     "G0 X0 Y0"
   ];
   for (const path of ordered) {
-    const start = physicalPoint(path.points[0], config);
+    const start = physicalPoint(path.points[0], config, area);
     if (path.closed && path.points.length > 2) path.points.push({ ...path.points[0] });
     lines.push(`G0 X${fmt(start.x)} Y${fmt(start.y)}`);
     lines.push(`G1 Z${fmt(config.penDown)} F${fmt(config.drawFeed)}`);
     for (const point of path.points.slice(1)) {
-      const output = physicalPoint(point, config);
+      const output = physicalPoint(point, config, area);
       lines.push(`G1 X${fmt(output.x)} Y${fmt(output.y)} F${fmt(config.drawFeed)}`);
     }
     lines.push(`G0 Z${fmt(config.penUp)} F${fmt(config.travelFeed)}`);

@@ -655,6 +655,7 @@ export class AppController {
     byId("canvas-dimensions").textContent = `${this.model.width} × ${this.model.height} mm`;
     byId("zoom-level").textContent = `${Math.round(this.canvas.zoom * 100)}%`;
     byId("coverage-label").textContent = `${estimateCoverage(this.model.objects, this.model.width, this.model.height).toFixed(1)}% estimated geometry coverage`;
+    this.canvas.setPlotterSize(numeric("machine-width"), numeric("machine-height"));
     this.canvas.draw();
     const bounds = this.model.outOfBounds;
     const importWarnings = this.model.objects.flatMap((object) => object.warnings.map((warning) => `${object.name}: ${warning}`));

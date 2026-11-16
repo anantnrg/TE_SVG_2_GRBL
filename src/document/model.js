@@ -77,3 +77,14 @@ export function paperDimensions(format, orientation, customWidth, customHeight) 
   if (orientation === "portrait" && width > height) [width, height] = [height, width];
   return { width, height };
 }
+
+export function plotterArea(paperWidth, paperHeight, machineWidth, machineHeight) {
+  const width = Math.min(paperWidth, machineWidth);
+  const height = Math.min(paperHeight, machineHeight);
+  return {
+    x: (paperWidth - width) / 2,
+    y: (paperHeight - height) / 2,
+    width,
+    height
+  };
+}

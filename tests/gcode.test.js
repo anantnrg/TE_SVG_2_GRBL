@@ -36,6 +36,21 @@ test("refuses any geometry outside paper or machine bounds", () => {
   assert.throws(() => generateGcode([square], { ...config, machineWidth: 15 }), /extends beyond/);
 });
 
+test("centers a smaller plotter area on the paper and maps its coordinates", () => {
+  const centeredConfig = {
+    ...config,
+    paperWidth: 300,
+    paperHeight: 400,
+    machineWidth: 100,
+    machineHeight: 200
+  };
+  const centeredSquare = { ...square, x: 110, y: 120 };
+  const output = generateGcode([centeredSquare], centeredConfig);
+
+  assert.match(output, /G0 X10 Y180/);
+  assert.throws(() => generateGcode([{ ...centeredSquare, x: 10 }], centeredConfig), /extends beyond/);
+});
+
 test("refuses non-finite geometry and out-of-range flattening tolerance", () => {
   assert.throws(() => generateGcode([{ ...square, x: Number.NaN }], config), /finite number/);
   assert.throws(() => generateGcode([square], { ...config, tolerance: 0.001 }), /between 0.01 and 5/);
